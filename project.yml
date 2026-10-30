@@ -1,0 +1,106 @@
+name: Complications
+
+options:
+  bundleIdPrefix: com.danfoygel
+  deploymentTarget:
+    watchOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    DEVELOPMENT_TEAM: ZVU48K8YCD
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  # Watch-only app (no iPhone companion). Tapping a complication opens it on that complication's screen.
+  Complications:
+    type: application
+    platform: watchOS
+    sources:
+      - Complications
+      - Shared
+    dependencies:
+      - target: ComplicationsWidgets
+    # The app group shares battery history and cached weather with the widgets.
+    entitlements:
+      path: Complications/Complications.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.danfoygel.complications]
+        com.apple.developer.weatherkit: true
+    info:
+      path: Complications/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.danfoygel.complications
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Complications
+        INFOPLIST_KEY_WKApplication: YES
+        INFOPLIST_KEY_WKWatchOnly: YES
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Shows your next event on the watch face.
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Shows the weather where you are.
+
+  ComplicationsWidgets:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - ComplicationsWidgets
+      - Shared
+    entitlements:
+      path: ComplicationsWidgets/ComplicationsWidgets.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.danfoygel.complications]
+        com.apple.developer.weatherkit: true
+    info:
+      path: ComplicationsWidgets/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSWidgetWantsLocation: true
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.danfoygel.complications.widgets
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Complications
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Shows your next event on the watch face.
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Shows the weather where you are.
+
+  # Hostless logic tests: Shared/ is compiled straight into the bundle.
+  ComplicationsTests:
+    type: bundle.unit-test
+    platform: watchOS
+    sources:
+      - ComplicationsTests
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.danfoygel.complications.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Complications:
+    build:
+      targets:
+        Complications: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ComplicationsTests
+  ComplicationsWidgets:
+    build:
+      targets:
+        ComplicationsWidgets: all
+        Complications: all
+    run:
+      config: Debug

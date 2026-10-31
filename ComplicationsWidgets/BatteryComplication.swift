@@ -1,7 +1,7 @@
 import SwiftUI
 import WidgetKit
 
-/// Watch and iPhone battery as the two halves of one ring, with both percents inside.
+/// Watch and iPhone battery as the two halves of one battery outline, with both percents inside.
 struct BatteryComplication: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: Route.battery.widgetKind, provider: BatteryProvider()) { entry in
@@ -9,8 +9,8 @@ struct BatteryComplication: Widget {
                 .containerBackground(.fill.tertiary, for: .widget)
                 .widgetURL(Route.battery.url)
         }
-        .configurationDisplayName("Battery Rings")
-        .description("Your watch's battery on the top half of the ring, your iPhone's on the bottom.")
+        .configurationDisplayName("Battery Outline")
+        .description("Your watch's battery on the top half of the outline, your iPhone's on the bottom.")
         .supportedFamilies([.accessoryCircular])
     }
 }
@@ -52,7 +52,7 @@ struct BatteryProvider: TimelineProvider {
 } timeline: {
     BatteryEntry(date: .now, level: 0.39, phone: PhoneBatteryReading(date: .now, level: 0.3, isPluggedIn: false))
     BatteryEntry(date: .now, level: 0.82, phone: PhoneBatteryReading(date: .now, level: 0.64, isPluggedIn: false))
-    BatteryEntry(date: .now, level: 0.35, phone: PhoneBatteryReading(date: .now, level: 0.99, isPluggedIn: true))
+    BatteryEntry(date: .now, level: 1, phone: PhoneBatteryReading(date: .now, level: 0.99, isPluggedIn: true))
     BatteryEntry(date: .now, level: 0.5, phone: PhoneBatteryReading(date: .distantPast, level: 0.4, isPluggedIn: false))
     BatteryEntry(date: .now, level: 0.99, phone: PhoneBatteryReading(date: .now, level: 0.08, isPluggedIn: false))
     BatteryEntry(date: .now, level: 0.08)

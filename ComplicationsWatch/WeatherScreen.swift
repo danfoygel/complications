@@ -79,7 +79,7 @@ struct WeatherScreen: View {
             return
         }
         if Location.isAuthorized != wasAuthorized {
-            WidgetCenter.shared.reloadTimelines(ofKind: Route.weather.widgetKind)
+            Route.weather.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
         }
         do {
             let (current, hourly, daily) = try await WeatherService.shared.weather(

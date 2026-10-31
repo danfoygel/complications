@@ -51,7 +51,7 @@ struct BatteryScreen: View {
         while !Task.isCancelled {
             if let reading = BatteryReading.current() {
                 history = BatteryForecast.record(reading)
-                WidgetCenter.shared.reloadTimelines(ofKind: Route.battery.widgetKind)
+                Route.battery.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
             }
             phone = await PhoneLink.shared.refresh()
             try? await Task.sleep(for: .seconds(60))

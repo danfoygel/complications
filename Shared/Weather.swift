@@ -12,6 +12,27 @@ struct WeatherEntry: TimelineEntry, Codable, Sendable {
     var high: Double
     var symbolName: String
     var condition: String
+    /// The next turning point of the temperature: the high still to come, or the low after it. `nil` when unknown.
+    var next: TemperatureExtreme?
+    /// Rain or snow expected in the 12 hours from `date`, drawn on the complication's clock ring.
+    var precipitation: [PrecipitationSpan]?
+}
+
+struct TemperatureExtreme: Codable, Sendable {
+    var temperature: Double
+    var isHigh: Bool
+}
+
+struct PrecipitationSpan: Codable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        case rain
+        /// Snow, sleet, or a mix: anything frozen.
+        case snow
+    }
+
+    var kind: Kind
+    var start: Date
+    var end: Date
 }
 
 enum Temperature {
@@ -24,13 +45,22 @@ enum Temperature {
                 numberFormatStyle: .number.precision(.fractionLength(0))
             ))
     }
+
+    /// "72" in the user's preferred unit, with no degree sign.
+    static func number(_ celsius: Double) -> String {
+        Measurement(value: celsius, unit: UnitTemperature.celsius)
+            .converted(to: UnitTemperature(forLocale: .current, usage: .weather))
+            .value
+            .formatted(.number.precision(.fractionLength(0)))
+    }
 }
 
 enum WeatherForecast {
     /// How far ahead hourly entries go. A reload normally comes well before the last one.
     static let horizon: TimeInterval = 6 * 60 * 60
 
-    /// Current conditions, then one entry per forecast hour up to `horizon`, each with its day's high and low.
+    /// Current conditions, then one entry per forecast hour up to `horizon`, each with its day's high and low, the
+    /// next high or low, and the rain or snow in the 12 hours after it.
     static func entries(for location: CLLocation, now: Date = .now) async throws -> [WeatherEntry] {
         let (current, hourly, daily) = try await WeatherService.shared.weather(
             for: location,
@@ -46,11 +76,8 @@ enum WeatherForecast {
         daily: Forecast<DayWeather>,
         now: Date = .now
     ) -> [WeatherEntry] {
-        func range(on date: Date) -> (low: Double, high: Double)? {
-            daily.first { Calendar.current.isDate($0.date, inSameDayAs: date) }.map {
-                ($0.lowTemperature.converted(to: .celsius).value, $0.highTemperature.converted(to: .celsius).value)
-            }
-        }
+        let hours = hourly.map(ForecastHour.init)
+        let days = daily.map(ForecastDay.init)
         func entry(
             date: Date,
             temperature: Measurement<UnitTemperature>,
@@ -58,14 +85,16 @@ enum WeatherForecast {
             condition: String
         ) -> WeatherEntry {
             let value = temperature.converted(to: .celsius).value
-            let day = range(on: date) ?? (value, value)
+            let day = days.first { Calendar.current.isDate($0.date, inSameDayAs: date) }
             return WeatherEntry(
                 date: date,
                 temperature: value,
-                low: min(day.low, value),
-                high: max(day.high, value),
+                low: min(day?.low ?? value, value),
+                high: max(day?.high ?? value, value),
                 symbolName: symbol,
-                condition: condition
+                condition: condition,
+                next: nextExtreme(after: date, temperature: value, hours: hours, days: days),
+                precipitation: precipitation(after: date, hours: hours)
             )
         }
 
@@ -100,6 +129,31 @@ enum WeatherForecast {
     }
 
     private static let cacheKey = "weatherEntries"
+}
+
+extension ForecastHour {
+    init(_ hour: HourWeather) {
+        let kind: PrecipitationSpan.Kind? = switch hour.precipitation {
+        case .none: nil
+        case .snow, .sleet, .mixed: .snow
+        default: .rain
+        }
+        self.init(
+            date: hour.date,
+            temperature: hour.temperature.converted(to: .celsius).value,
+            precipitation: hour.precipitationChance >= WeatherForecast.precipitationThreshold ? kind : nil
+        )
+    }
+}
+
+extension ForecastDay {
+    init(_ day: DayWeather) {
+        self.init(
+            date: day.date,
+            low: day.lowTemperature.converted(to: .celsius).value,
+            high: day.highTemperature.converted(to: .celsius).value
+        )
+    }
 }
 
 enum Location {

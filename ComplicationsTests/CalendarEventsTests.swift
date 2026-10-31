@@ -66,4 +66,13 @@ struct CalendarEventsTests {
         #expect(upNext.rest.map(\.id) == ["a"])
         #expect(CalendarEvents.upNext(at: now, in: [allDay("day")]) == CalendarEvents.UpNext(lead: nil, rest: []))
     }
+
+    @Test func eventsOverTwelveHoursAreNeverShown() {
+        // A week-long trip that's on now, and one exactly 12 hours long, which still counts.
+        let trip = event("trip", minutes: -60, length: 7 * 24 * 60)
+        let shift = event("shift", minutes: 30, length: 12 * 60)
+        let upNext = CalendarEvents.upNext(at: now, in: [trip, shift, event("a", minutes: 90)])
+        #expect(upNext.lead?.id == "shift")
+        #expect(upNext.rest.map(\.id) == ["a"])
+    }
 }

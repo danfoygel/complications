@@ -9,7 +9,15 @@ struct ComplicationsWatchApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            #if DEBUG
+                if CommandLine.arguments.contains("-complicationGallery") {
+                    ComplicationGallery()
+                } else {
+                    RootView()
+                }
+            #else
+                RootView()
+            #endif
         }
         .backgroundTask(.watchConnectivity) {
             await PhoneLink.shared.waitForPendingContent()

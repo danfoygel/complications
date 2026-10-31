@@ -19,7 +19,9 @@ struct WeatherScreen: View {
             case .loading:
                 ProgressView()
             case let .failed(message):
-                Text(message).foregroundStyle(.secondary)
+                Text(message)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             case let .loaded(current, hourly, daily, attribution):
                 Section {
                     VStack(alignment: .leading) {
@@ -84,9 +86,14 @@ struct WeatherScreen: View {
                 for: location,
                 including: .current, .hourly, .daily
             )
+            // Hand the forecast to the complication, which may have failed its own fetch and be waiting to retry.
+            WeatherForecast.save(WeatherForecast.entries(current: current, hourly: hourly, daily: daily))
+            WidgetCenter.shared.reloadTimelines(ofKind: Route.weather.widgetKind)
             phase = await .loaded(current, hourly, daily, try? WeatherService.shared.attribution)
         } catch {
-            phase = .failed("Couldn't load the weather: \(error.localizedDescription)")
+            // The domain and code, which `localizedDescription` buries, say which WeatherKit check failed.
+            let nsError = error as NSError
+            phase = .failed("Couldn't load the weather (\(nsError.domain) \(nsError.code)): \(error)")
         }
     }
 }

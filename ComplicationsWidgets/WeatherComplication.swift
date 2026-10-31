@@ -19,6 +19,8 @@ struct WeatherTimelineEntry: TimelineEntry {
     var date: Date
     /// `nil` when there is no location or forecast to show.
     var weather: WeatherEntry?
+    /// Whether a location was found, so an empty entry can say which of the two is missing.
+    var hasLocation = true
 }
 
 /// Fetches every 30 minutes (the system may stretch that) and fills the gap with the hourly forecast.
@@ -40,7 +42,8 @@ struct WeatherProvider: TimelineProvider {
         Task {
             let now = Date.now
             var forecast: [WeatherEntry] = []
-            if let location = await Location.current() {
+            let location = await Location.current()
+            if let location {
                 do {
                     forecast = try await WeatherForecast.entries(for: location, now: now)
                     WeatherForecast.save(forecast)
@@ -49,7 +52,7 @@ struct WeatherProvider: TimelineProvider {
                 }
             }
             let entries = forecast.isEmpty
-                ? [WeatherTimelineEntry(date: now, weather: nil)]
+                ? [WeatherTimelineEntry(date: now, weather: nil, hasLocation: location != nil)]
                 : forecast.map { WeatherTimelineEntry(date: max($0.date, now), weather: $0) }
             let retry: TimeInterval = forecast.isEmpty ? 15 * 60 : 30 * 60
             completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(retry))))
@@ -73,7 +76,7 @@ struct WeatherComplicationView: View {
         } else {
             ZStack {
                 AccessoryWidgetBackground()
-                Image(systemName: "location.slash")
+                Image(systemName: entry.hasLocation ? "icloud.slash" : "location.slash")
                     .font(.title3)
             }
         }
@@ -96,4 +99,5 @@ extension WeatherEntry {
 } timeline: {
     WeatherTimelineEntry(date: .now, weather: .sample)
     WeatherTimelineEntry(date: .now, weather: nil)
+    WeatherTimelineEntry(date: .now, weather: nil, hasLocation: false)
 }

@@ -36,6 +36,16 @@ enum WeatherForecast {
             for: location,
             including: .current, .hourly, .daily
         )
+        return entries(current: current, hourly: hourly, daily: daily, now: now)
+    }
+
+    /// The entries for a forecast already fetched, as `WeatherScreen` has.
+    static func entries(
+        current: CurrentWeather,
+        hourly: Forecast<HourWeather>,
+        daily: Forecast<DayWeather>,
+        now: Date = .now
+    ) -> [WeatherEntry] {
         func range(on date: Date) -> (low: Double, high: Double)? {
             daily.first { Calendar.current.isDate($0.date, inSameDayAs: date) }.map {
                 ($0.lowTemperature.converted(to: .celsius).value, $0.highTemperature.converted(to: .celsius).value)

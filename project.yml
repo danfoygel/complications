@@ -3,6 +3,7 @@ name: Complications
 options:
   bundleIdPrefix: com.danfoygel
   deploymentTarget:
+    iOS: "26.0"
     watchOS: "26.0"
   createIntermediateGroups: true
   generateEmptyDirectories: true
@@ -16,34 +17,62 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
 
 targets:
-  # Watch-only app (no iPhone companion). Tapping a complication opens it on that complication's screen.
+  # iPhone companion. Its only job is getting the phone's battery level to the watch.
   Complications:
     type: application
-    platform: watchOS
+    platform: iOS
     sources:
       - Complications
-      - Shared
+      - Connectivity
     dependencies:
-      - target: ComplicationsWidgets
-    # The app group shares battery history and cached weather with the widgets.
-    entitlements:
-      path: Complications/Complications.entitlements
-      properties:
-        com.apple.security.application-groups: [group.com.danfoygel.complications]
-        com.apple.developer.weatherkit: true
+      - target: ComplicationsWatch
     info:
       path: Complications/Info.plist
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [com.danfoygel.complications.refresh]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.danfoygel.complications
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Complications
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+
+  # Tapping a complication opens this app on that complication's screen.
+  ComplicationsWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - ComplicationsWatch
+      - Shared
+      - Connectivity
+    dependencies:
+      - target: ComplicationsWidgets
+    # The app group shares battery history, the phone's battery, and cached weather with the widgets.
+    entitlements:
+      path: ComplicationsWatch/ComplicationsWatch.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.danfoygel.complications]
+        com.apple.developer.weatherkit: true
+    info:
+      path: ComplicationsWatch/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.danfoygel.complications.watchkitapp
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Complications
         INFOPLIST_KEY_WKApplication: YES
-        INFOPLIST_KEY_WKWatchOnly: YES
+        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.danfoygel.complications
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Shows your next event on the watch face.
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Shows the weather where you are.
 
@@ -53,6 +82,7 @@ targets:
     sources:
       - ComplicationsWidgets
       - Shared
+      - Connectivity
     entitlements:
       path: ComplicationsWidgets/ComplicationsWidgets.entitlements
       properties:
@@ -68,19 +98,20 @@ targets:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.danfoygel.complications.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.danfoygel.complications.watchkitapp.widgets
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Complications
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Shows your next event on the watch face.
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Shows the weather where you are.
 
-  # Hostless logic tests: Shared/ is compiled straight into the bundle.
+  # Hostless logic tests: Shared/ and Connectivity/ are compiled straight into the bundle.
   ComplicationsTests:
     type: bundle.unit-test
     platform: watchOS
     sources:
       - ComplicationsTests
       - Shared
+      - Connectivity
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.danfoygel.complications.tests
@@ -93,14 +124,13 @@ schemes:
         Complications: all
     run:
       config: Debug
+  ComplicationsWatch:
+    build:
+      targets:
+        ComplicationsWatch: all
+    run:
+      config: Debug
     test:
       config: Debug
       targets:
         - ComplicationsTests
-  ComplicationsWidgets:
-    build:
-      targets:
-        ComplicationsWidgets: all
-        Complications: all
-    run:
-      config: Debug

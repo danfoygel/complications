@@ -10,20 +10,21 @@ struct BatteryComplication: Widget {
                 .widgetURL(Route.battery.url)
         }
         .configurationDisplayName("Battery Outline")
-        .description("Battery percentage with a battery-shaped gauge.")
+        .description("Watch battery in a battery-shaped gauge, with your iPhone's battery below.")
         .supportedFamilies([.accessoryCircular])
     }
 }
 
-/// Re-reads the battery every 15 minutes (the system may stretch that) and fills the gap with a forecast.
+/// Re-reads the battery every 15 minutes (the system may stretch that) and fills the gap with a forecast. The phone's
+/// reading comes from whatever the watch app last received; receiving a newer one reloads this.
 struct BatteryProvider: TimelineProvider {
     func placeholder(in _: Context) -> BatteryEntry {
-        BatteryEntry(date: .now, level: 0.82)
+        BatteryEntry(date: .now, level: 0.82, phone: PhoneBatteryReading(date: .now, level: 0.64, isPluggedIn: false))
     }
 
     func getSnapshot(in _: Context, completion: @escaping @Sendable (BatteryEntry) -> Void) {
         Task { @MainActor in
-            completion(BatteryEntry(date: .now, level: BatteryReading.current()?.level))
+            completion(BatteryEntry(date: .now, level: BatteryReading.current()?.level, phone: .saved()))
         }
     }
 
@@ -38,35 +39,67 @@ struct BatteryProvider: TimelineProvider {
             } else {
                 [BatteryEntry(date: now, level: nil)]
             }
-            completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(15 * 60))))
+            completion(Timeline(
+                entries: BatteryForecast.adding(.saved(), to: entries),
+                policy: .after(now.addingTimeInterval(15 * 60))
+            ))
         }
     }
 }
 
+/// The watch's battery outline, with the phone's percent below it once the phone app has sent one. A stale phone
+/// reading is dimmed rather than hidden.
 struct BatteryComplicationView: View {
     let entry: BatteryEntry
 
     var body: some View {
         GeometryReader { geometry in
             let side = min(geometry.size.width, geometry.size.height)
-            let outline = BatteryOutline()
-            ZStack {
-                outline.stroke(.secondary.opacity(0.35), lineWidth: side * 0.07)
-                outline
-                    .trim(from: 0, to: entry.level ?? 0)
-                    .stroke(tint, style: StrokeStyle(lineWidth: side * 0.07, lineCap: .round, lineJoin: .round))
-                    .widgetAccentable()
-                Text(entry.percent.map { "\($0)%" } ?? "--")
-                    .font(.system(size: side * 0.24, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .minimumScaleFactor(0.5)
-                    .lineLimit(1)
-                    .frame(width: side * 0.58)
-                    .padding(.trailing, side * 0.84 * BatteryOutline.nubFraction)
+            VStack(spacing: side * 0.04) {
+                if let phone = entry.phone {
+                    // Smaller, so both fit inside the circle.
+                    watch(side: side, width: 0.76, height: 0.42)
+                    phoneRow(phone, side: side)
+                } else {
+                    watch(side: side, width: 0.84, height: 0.48)
+                }
             }
-            .frame(width: side * 0.84, height: side * 0.48)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private func watch(side: Double, width: Double, height: Double) -> some View {
+        let outline = BatteryOutline()
+        return ZStack {
+            outline.stroke(.secondary.opacity(0.35), lineWidth: side * 0.07)
+            outline
+                .trim(from: 0, to: entry.level ?? 0)
+                .stroke(tint, style: StrokeStyle(lineWidth: side * 0.07, lineCap: .round, lineJoin: .round))
+                .widgetAccentable()
+            Text(entry.percent.map { "\($0)%" } ?? "--")
+                .font(.system(size: side * height * 0.5, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
+                .frame(width: side * width * 0.69)
+                .padding(.trailing, side * width * BatteryOutline.nubFraction)
+        }
+        .frame(width: side * width, height: side * height)
+    }
+
+    private func phoneRow(_ phone: PhoneBatteryReading, side: Double) -> some View {
+        HStack(spacing: side * 0.02) {
+            Image(systemName: "iphone")
+            Text("\(phone.percent)%").monospacedDigit()
+            if phone.isPluggedIn {
+                Image(systemName: "bolt.fill").imageScale(.small)
+            }
+        }
+        .font(.system(size: side * 0.17, weight: .semibold, design: .rounded))
+        .foregroundStyle(phone.level <= 0.1 ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
+        .opacity(phone.isStale(at: entry.date) ? 0.4 : 1)
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
     }
 
     private var tint: Color {
@@ -130,6 +163,9 @@ struct BatteryOutline: Shape {
 #Preview(as: .accessoryCircular) {
     BatteryComplication()
 } timeline: {
+    BatteryEntry(date: .now, level: 0.82, phone: PhoneBatteryReading(date: .now, level: 0.64, isPluggedIn: false))
+    BatteryEntry(date: .now, level: 0.35, phone: PhoneBatteryReading(date: .now, level: 1, isPluggedIn: true))
+    BatteryEntry(date: .now, level: 0.5, phone: PhoneBatteryReading(date: .distantPast, level: 0.4, isPluggedIn: false))
     BatteryEntry(date: .now, level: 0.82)
     BatteryEntry(date: .now, level: 0.35)
     BatteryEntry(date: .now, level: 0.08)

@@ -6,6 +6,8 @@ struct BatteryEntry: TimelineEntry {
     var date: Date
     /// 0...1, or `nil` when the watch can't report it.
     var level: Double?
+    /// The phone's latest reading, if the phone app has ever sent one.
+    var phone: PhoneBatteryReading?
 
     var percent: Int? {
         level.map { Int(($0 * 100).rounded()) }
@@ -72,6 +74,20 @@ enum BatteryForecast {
         return entries
     }
 
+    /// Puts `phone` on every entry, adding one for when it goes stale so the complication dims it on time.
+    static func adding(_ phone: PhoneBatteryReading?, to entries: [BatteryEntry]) -> [BatteryEntry] {
+        var result = entries.map {
+            var entry = $0
+            entry.phone = phone
+            return entry
+        }
+        guard let phone, let first = result.first else { return result }
+        let staleDate = phone.date.addingTimeInterval(PhoneBatteryReading.staleAfter + 1)
+        guard staleDate > first.date, let before = result.last(where: { $0.date < staleDate }) else { return result }
+        result.append(BatteryEntry(date: staleDate, level: before.level, phone: phone))
+        return result.sorted { $0.date < $1.date }
+    }
+
     /// Adds `reading` to the saved history and returns it, oldest first. A charger change starts a new history.
     static func record(_ reading: BatteryReading, in defaults: UserDefaults = AppGroup.defaults) -> [BatteryReading] {
         let key = "batteryHistory"
@@ -94,5 +110,23 @@ extension BatteryReading {
         let level = device.batteryLevel
         guard level >= 0 else { return nil }
         return BatteryReading(date: .now, level: min(1, Double(level)), isPluggedIn: device.batteryState != .unplugged)
+    }
+}
+
+/// The phone's latest reading, saved where the complication can read it.
+extension PhoneBatteryReading {
+    private static let key = "phoneBattery"
+
+    static func saved(in defaults: UserDefaults = AppGroup.defaults) -> PhoneBatteryReading? {
+        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Self.self, from: $0) }
+    }
+
+    /// Saves this reading unless a newer one is already saved; returns whether it did.
+    @discardableResult func save(in defaults: UserDefaults = AppGroup.defaults) -> Bool {
+        if let saved = Self.saved(in: defaults), saved.date >= date {
+            return false
+        }
+        defaults.set(try? JSONEncoder().encode(self), forKey: Self.key)
+        return true
     }
 }

@@ -63,3 +63,45 @@ struct RouteTests {
         #expect(try Route(url: #require(URL(string: "complications://nope"))) == nil)
     }
 }
+
+struct PhoneBatteryTests {
+    private let start = Date(timeIntervalSinceReferenceDate: 0)
+
+    @Test func messageRoundTrips() {
+        let reading = PhoneBatteryReading(date: start, level: 0.64, isPluggedIn: true)
+        #expect(PhoneBatteryReading(message: reading.message) == reading)
+        #expect(PhoneBatteryReading(message: PhoneBatteryReading.request) == nil)
+        #expect(PhoneBatteryReading.isRequest(PhoneBatteryReading.request))
+        #expect(!PhoneBatteryReading.isRequest(reading.message))
+    }
+
+    @Test func saveKeepsTheNewest() throws {
+        let defaults = try #require(UserDefaults(suiteName: "PhoneBatteryTests"))
+        defaults.removePersistentDomain(forName: "PhoneBatteryTests")
+        let older = PhoneBatteryReading(date: start, level: 0.5, isPluggedIn: false)
+        let newer = PhoneBatteryReading(date: start.addingTimeInterval(60), level: 0.49, isPluggedIn: false)
+        #expect(newer.save(in: defaults))
+        #expect(!older.save(in: defaults))
+        #expect(PhoneBatteryReading.saved(in: defaults) == newer)
+    }
+
+    @Test func addsAnEntryWhenThePhoneReadingGoesStale() {
+        let phone = PhoneBatteryReading(date: start, level: 0.5, isPluggedIn: false)
+        let entries = [
+            BatteryEntry(date: start.addingTimeInterval(30 * 60), level: 0.8),
+            BatteryEntry(date: start.addingTimeInterval(90 * 60), level: 0.79),
+        ]
+        let result = BatteryForecast.adding(phone, to: entries)
+        #expect(result.count == 3)
+        #expect(result.allSatisfy { $0.phone == phone })
+        #expect(result[1].level == 0.8)
+        #expect(!(result[0].phone?.isStale(at: result[0].date) ?? true))
+        #expect(result[1].phone?.isStale(at: result[1].date) == true)
+    }
+
+    @Test func noStaleEntryForAnAlreadyStaleReading() {
+        let phone = PhoneBatteryReading(date: start, level: 0.5, isPluggedIn: false)
+        let entries = [BatteryEntry(date: start.addingTimeInterval(3 * 60 * 60), level: 0.8)]
+        #expect(BatteryForecast.adding(phone, to: entries).count == 1)
+    }
+}

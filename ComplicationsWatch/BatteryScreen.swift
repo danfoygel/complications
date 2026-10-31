@@ -1,9 +1,10 @@
 import SwiftUI
 import WidgetKit
 
-/// The battery level with an estimate of time to empty, or to full while charging.
+/// The battery level with an estimate of time to empty, or to full while charging, and the phone's battery.
 struct BatteryScreen: View {
     @State private var history: [BatteryReading] = []
+    @State private var phone = PhoneBatteryReading.saved()
 
     var body: some View {
         let current = history.last
@@ -25,6 +26,9 @@ struct BatteryScreen: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+
+                Divider()
+                PhoneBatteryRow(reading: phone)
             }
             .frame(maxWidth: .infinity)
         }
@@ -41,15 +45,52 @@ struct BatteryScreen: View {
         return current.isPluggedIn ? "Full in about \(duration)" : "About \(duration) left"
     }
 
-    /// Takes a reading now and every minute while the screen is open, adding each to the shared history.
+    /// Takes a reading now and every minute while the screen is open, adding each to the shared history, and
+    /// asks the phone for its battery each time.
     private func refresh() async {
         while !Task.isCancelled {
             if let reading = BatteryReading.current() {
                 history = BatteryForecast.record(reading)
                 WidgetCenter.shared.reloadTimelines(ofKind: Route.battery.widgetKind)
             }
+            phone = await PhoneLink.shared.refresh()
             try? await Task.sleep(for: .seconds(60))
         }
+    }
+}
+
+private struct PhoneBatteryRow: View {
+    let reading: PhoneBatteryReading?
+
+    var body: some View {
+        VStack(spacing: 2) {
+            if let reading {
+                Label {
+                    Text("\(reading.percent)%" + (reading.isPluggedIn ? " · Charging" : ""))
+                } icon: {
+                    Image(systemName: "iphone")
+                }
+                .font(.headline)
+                .foregroundStyle(reading.level <= 0.1 ? .red : .primary)
+                TimelineView(.everyMinute) { context in
+                    Text(updated(reading, now: context.date))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Label("iPhone", systemImage: "iphone").font(.headline)
+                Text("Open Complications on your iPhone to start sending its battery.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
+    private func updated(_ reading: PhoneBatteryReading, now: Date) -> String {
+        now.timeIntervalSince(reading.date) < 60
+            ? "Just now"
+            : "Updated " + reading.date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
     }
 }
 

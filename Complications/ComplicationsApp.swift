@@ -1,56 +1,41 @@
+import BackgroundTasks
 import SwiftUI
 
 @main
 struct ComplicationsApp: App {
+    @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        // Early, so a watch request that launched the app in the background finds an active session.
+        WatchLink.shared.start()
+    }
+
     var body: some Scene {
         WindowGroup {
-            RootView()
+            PhoneView()
+        }
+        // Not from init: submitting before SwiftUI has registered the `.backgroundTask` handler below is an
+        // assertion failure that kills the app at launch.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                BackgroundRefresh.schedule()
+            }
+        }
+        .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
+            BackgroundRefresh.schedule()
+            await WatchLink.shared.send()
         }
     }
 }
 
-/// A list of the three screens. A complication's URL replaces the navigation path with that complication's screen.
-struct RootView: View {
-    @State private var path: [Route] = []
+/// Asks iOS to run the app every 15 minutes or so to send the battery. iOS decides when, and for an app that's
+/// rarely opened that can be hours apart; the Shortcuts automations are what keep the watch current.
+enum BackgroundRefresh {
+    static let identifier = "com.danfoygel.complications.refresh"
 
-    var body: some View {
-        NavigationStack(path: $path) {
-            List(Route.allCases, id: \.self) { route in
-                NavigationLink(value: route) {
-                    Label(route.title, systemImage: route.symbol)
-                }
-            }
-            .navigationTitle("Complications")
-            .navigationDestination(for: Route.self) { route in
-                switch route {
-                case .calendar: CalendarScreen()
-                case .battery: BatteryScreen()
-                case .weather: WeatherScreen()
-                }
-            }
-        }
-        .onOpenURL { url in
-            if let route = Route(url: url) {
-                path = [route]
-            }
-        }
-    }
-}
-
-extension Route {
-    var title: String {
-        switch self {
-        case .calendar: "Calendar"
-        case .battery: "Battery"
-        case .weather: "Weather"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .calendar: "calendar"
-        case .battery: "battery.75percent"
-        case .weather: "cloud.sun"
-        }
+    static func schedule() {
+        let request = BGAppRefreshTaskRequest(identifier: identifier)
+        request.earliestBeginDate = .now.addingTimeInterval(15 * 60)
+        try? BGTaskScheduler.shared.submit(request)
     }
 }

@@ -2,7 +2,8 @@
 *.xcodeproj/
 *.xcworkspace/
 Complications/Info.plist
-Complications/Complications.entitlements
+ComplicationsWatch/Info.plist
+ComplicationsWatch/ComplicationsWatch.entitlements
 ComplicationsWidgets/Info.plist
 ComplicationsWidgets/ComplicationsWidgets.entitlements
 

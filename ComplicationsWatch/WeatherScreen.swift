@@ -12,8 +12,6 @@ struct WeatherScreen: View {
     }
 
     @State private var phase = Phase.loading
-    /// Keeps the When In Use authorization prompt (and live updates) available while the screen is open.
-    @State private var session: CLServiceSession?
 
     var body: some View {
         List {
@@ -73,8 +71,7 @@ struct WeatherScreen: View {
 
     private func load() async {
         let wasAuthorized = Location.isAuthorized
-        session = CLServiceSession(authorization: .whenInUse)
-        defer { session = nil }
+        await LocationPermission().request()
         guard let location = await Location.current() else {
             phase = .failed("Allow location access in Settings › Privacy & Security › Location Services.")
             return

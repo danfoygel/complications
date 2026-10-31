@@ -1,7 +1,9 @@
 included:
   - Complications
+  - ComplicationsWatch
   - ComplicationsWidgets
   - Shared
+  - Connectivity
   - ComplicationsTests
 excluded:
   - "**/Assets.xcassets"

@@ -188,12 +188,14 @@ private actor SharedFetch {
     }
 }
 
-/// The minute, hourly and daily forecasts behind the calendar's weather line (`WeatherLine`).
+/// The minute, hourly and daily forecasts and the air quality behind the calendar's weather line (`WeatherLine`).
 struct PrecipitationForecast: Sendable {
     var minutes: [ForecastMinute]
     var hours: [ForecastHour]
-    /// For the next day with rain or snow when there's none in the next 12 hours, and the sunrises and sunsets.
+    /// For the next day with rain or snow when there's none in the next 24 hours, and the sunrises and sunsets.
     var days: [ForecastDay]
+    /// For the air quality shown when it's dry.
+    var airQuality: [AirQualityReading] = []
 }
 
 extension PrecipitationForecast {
@@ -223,7 +225,9 @@ extension ForecastHour {
         self.init(
             date: hour.date,
             temperature: hour.temperature.converted(to: .celsius).value,
-            precipitation: PrecipitationSpan.Kind(hour.precipitation, chance: hour.precipitationChance)
+            precipitation: PrecipitationSpan.Kind(hour.precipitation, chance: hour.precipitationChance),
+            precipitationAmount: hour.precipitationAmount.converted(to: .millimeters).value,
+            snowfallAmount: hour.snowfallAmount.converted(to: .millimeters).value
         )
     }
 }

@@ -78,17 +78,18 @@ struct CalendarComplicationView: View {
                 if let lead = upNext.lead {
                     leadRow(lead)
                 }
-                Grid(alignment: .leading, horizontalSpacing: 5, verticalSpacing: 1) {
-                    ForEach(upNext.rest) { event in
-                        GridRow {
-                            Text(label(event))
-                                .font(.footnote.weight(.semibold))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                            Text(event.title)
-                                .font(.body.weight(.medium))
-                                .foregroundStyle(upNext.lead == nil ? .primary : .secondary)
-                        }
+                // Each title starts right after its own label rather than in a column, so it gets all the width
+                // that row's label leaves.
+                ForEach(upNext.rest) { event in
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(label(event))
+                            .font(.footnote.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .fixedSize()
+                        FittedText(event.title)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(upNext.lead == nil ? .primary : .secondary)
                     }
                 }
             }
@@ -114,7 +115,7 @@ struct CalendarComplicationView: View {
                 .fill(Color(event.color))
                 .frame(width: 4, height: 18)
                 .widgetAccentable()
-            Text(event.title)
+            FittedText(event.title)
                 .font(.headline)
                 .widgetAccentable()
             Spacer(minLength: 0)
@@ -131,7 +132,7 @@ struct CalendarComplicationView: View {
         event.start <= entry.date ? "Now" : clock(event.start)
     }
 
-    /// "11:30" today, with the weekday later this week ("Sat 1pm", "Sat 1:30pm", "Sat 13:30"), or just the date a week
+    /// "11:30" today, with the weekday later this week ("Sa 1pm", "Sa 1:30pm", "Sa 13:30"), or just the date a week
     /// or more away ("Nov 6"), where a weekday would read as this one.
     private func clock(_ date: Date) -> String {
         let calendar = Calendar.current
@@ -148,11 +149,12 @@ struct CalendarComplicationView: View {
         if Self.timeFormat.contains("h") {
             // Without the space before AM/PM, and without ":00", to fit beside the title.
             let onTheHour = calendar.component(.minute, from: date) == 0
-            formatter.dateFormat = onTheHour ? "EEE ha" : "EEE h:mma"
+            // The two-letter weekday ("EEEEEE") for the same reason.
+            formatter.dateFormat = onTheHour ? "EEEEEE ha" : "EEEEEE h:mma"
             formatter.amSymbol = "am"
             formatter.pmSymbol = "pm"
         } else {
-            formatter.dateFormat = "EEE " + Self.timeFormat
+            formatter.dateFormat = "EEEEEE " + Self.timeFormat
         }
         return formatter.string(from: date)
     }
@@ -171,6 +173,37 @@ struct CalendarComplicationView: View {
     }
 }
 
+/// One line of text cut off at the last whole character that fits, with no "…": on a complication that space is better
+/// spent on another character or two.
+struct FittedText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        // ViewThatFits shows the first that fits the width, so the longest prefix; the last, an empty one, always does.
+        ViewThatFits(in: .horizontal) {
+            ForEach(Self.prefixes(of: text), id: \.self) { prefix in
+                Text(prefix).lineLimit(1)
+            }
+        }
+    }
+
+    /// Every prefix, longest first, without trailing spaces and so without repeats.
+    static func prefixes(of text: String) -> [String] {
+        var prefixes: [String] = []
+        for length in stride(from: text.count, through: 0, by: -1) {
+            let prefix = String(text.prefix(length).trimmingCharacters(in: .whitespaces))
+            if prefix != prefixes.last {
+                prefixes.append(prefix)
+            }
+        }
+        return prefixes
+    }
+}
+
 extension CalendarEvent {
     static let samples = [
         sample(id: "standup", "Standup", minutes: -5, length: 15, color: RGB(red: 0.04, green: 0.52, blue: 1)),
@@ -181,6 +214,14 @@ extension CalendarEvent {
         sample(id: "lunch", "Lunch with Sam", minutes: 145, length: 60, color: RGB(red: 0.19, green: 0.82, blue: 0.35)),
         sample(id: "priya", "1:1 with Priya", minutes: 235, length: 30, color: RGB(red: 0.75, green: 0.35, blue: 0.95)),
     ]
+
+    /// The samples two days later, so they show their weekday.
+    static let laterSamples = samples.map {
+        var event = $0
+        event.start.addTimeInterval(2 * 24 * 60 * 60)
+        event.end.addTimeInterval(2 * 24 * 60 * 60)
+        return event
+    }
 
     private static func sample(id: String, _ title: String, minutes: Double, length: Double, color: RGB) -> Self {
         CalendarEvent(
@@ -204,6 +245,8 @@ extension CalendarEvent {
     CalendarEntry(date: .now.addingTimeInterval(20 * 60), events: CalendarEvent.samples, isAuthorized: true)
     // Review starts within the hour.
     CalendarEntry(date: .now.addingTimeInterval(40 * 60), events: CalendarEvent.samples, isAuthorized: true)
+    // Later this week: each title right after its weekday, cut off without "…".
+    CalendarEntry(date: .now, events: CalendarEvent.laterSamples, isAuthorized: true)
     CalendarEntry(date: .now, events: [], isAuthorized: true)
     CalendarEntry(date: .now, events: [], isAuthorized: false)
 }

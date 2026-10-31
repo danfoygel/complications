@@ -1,7 +1,7 @@
 import SwiftUI
 import WidgetKit
 
-/// Battery percentage inside a battery outline that fills, like a ring gauge, in proportion to the charge.
+/// Watch and iPhone battery as the two halves of one ring, with both percents inside.
 struct BatteryComplication: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: Route.battery.widgetKind, provider: BatteryProvider()) { entry in
@@ -9,8 +9,8 @@ struct BatteryComplication: Widget {
                 .containerBackground(.fill.tertiary, for: .widget)
                 .widgetURL(Route.battery.url)
         }
-        .configurationDisplayName("Battery Outline")
-        .description("Watch battery in a battery-shaped gauge, with your iPhone's battery below.")
+        .configurationDisplayName("Battery Rings")
+        .description("Your watch's battery on the top half of the ring, your iPhone's on the bottom.")
         .supportedFamilies([.accessoryCircular])
     }
 }
@@ -47,128 +47,89 @@ struct BatteryProvider: TimelineProvider {
     }
 }
 
-/// The watch's battery outline, with the phone's percent below it once the phone app has sent one. A stale phone
-/// reading is dimmed rather than hidden.
+/// The watch's percent over the phone's, inside a ring split in two: the top half is the watch's battery, the bottom
+/// half the phone's. Both halves fill from 9 o'clock, the watch's clockwise over the top and the phone's
+/// counter-clockwise under the bottom, so each drains back toward 9 o'clock. A stale phone reading is dimmed rather
+/// than hidden; with no reading yet its half is empty.
 struct BatteryComplicationView: View {
     let entry: BatteryEntry
 
     var body: some View {
         GeometryReader { geometry in
             let side = min(geometry.size.width, geometry.size.height)
-            VStack(spacing: side * 0.04) {
-                if let phone = entry.phone {
-                    // Smaller, so both fit inside the circle.
-                    watch(side: side, width: 0.76, height: 0.42)
-                    phoneRow(phone, side: side)
-                } else {
-                    watch(side: side, width: 0.84, height: 0.48)
-                }
+            ZStack {
+                halfRing(entry.level, tint: .green, isTop: true, side: side)
+                halfRing(entry.phone?.level, tint: .blue, isTop: false, side: side)
+                    .opacity(isPhoneStale ? 0.4 : 1)
+                percent(entry.percent, color: .white, centerY: Layout.watchNumberY, side: side)
+                percent(entry.phone?.percent, color: .cyan, centerY: Layout.phoneNumberY, side: side)
+                    .opacity(isPhoneStale ? 0.4 : 1)
             }
+            .frame(width: side, height: side)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private func watch(side: Double, width: Double, height: Double) -> some View {
-        let outline = BatteryOutline()
+    private var isPhoneStale: Bool {
+        entry.phone?.isStale(at: entry.date) ?? false
+    }
+
+    /// A circle's path starts at 3 o'clock and runs clockwise, so the bottom half is its first half as drawn, and
+    /// turning it 180° puts that half on top.
+    private func halfRing(_ level: Double?, tint: Color, isTop: Bool, side: Double) -> some View {
+        let lineWidth = side * Layout.thickness
+        let diameter = side * (1 - Layout.thickness)
+        let style = StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+        // Each end stops short of 3 and 9 o'clock by half the gap plus its rounded cap, as a share of the
+        // circumference.
+        let inset = (Layout.gap + Layout.thickness) / 2 / (.pi * (1 - Layout.thickness))
+        let start = inset
+        let end = 0.5 - inset
+        let filled = (end - start) * min(max(level ?? 0, 0), 1)
         return ZStack {
-            outline.stroke(.secondary.opacity(0.35), lineWidth: side * 0.07)
-            outline
-                .trim(from: 0, to: entry.level ?? 0)
-                .stroke(tint, style: StrokeStyle(lineWidth: side * 0.07, lineCap: .round, lineJoin: .round))
+            Circle().trim(from: start, to: end).stroke(Color(white: 0.3), style: style)
+            Circle()
+                // On top the fill runs on from 9 o'clock; on the bottom it runs back to it.
+                .trim(from: isTop ? start : end - filled, to: isTop ? start + filled : end)
+                .stroke((level ?? 0) <= 0.1 ? .red : tint, style: style)
                 .widgetAccentable()
-            Text(entry.percent.map { "\($0)%" } ?? "--")
-                .font(.system(size: side * height * 0.5, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
-                .frame(width: side * width * 0.69)
-                .padding(.trailing, side * width * BatteryOutline.nubFraction)
         }
-        .frame(width: side * width, height: side * height)
+        .rotationEffect(.degrees(isTop ? 180 : 0))
+        .frame(width: diameter, height: diameter)
     }
 
-    private func phoneRow(_ phone: PhoneBatteryReading, side: Double) -> some View {
-        HStack(spacing: side * 0.02) {
-            Image(systemName: "iphone")
-            Text("\(phone.percent)%").monospacedDigit()
-            if phone.isPluggedIn {
-                Image(systemName: "bolt.fill").imageScale(.small)
-            }
-        }
-        .font(.system(size: side * 0.17, weight: .semibold, design: .rounded))
-        .foregroundStyle(phone.level <= 0.1 ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
-        .opacity(phone.isStale(at: entry.date) ? 0.4 : 1)
-        .lineLimit(1)
-        .minimumScaleFactor(0.6)
-    }
-
-    private var tint: Color {
-        (entry.level ?? 0) <= 0.1 ? .red : .green
+    private func percent(_ value: Int?, color: Color, centerY: Double, side: Double) -> some View {
+        Text(value.map(String.init) ?? "--")
+            .font(.system(size: side * Layout.fontSize, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            .frame(width: side * Layout.textWidth)
+            .position(x: side / 2, y: side * centerY)
     }
 }
 
-/// A horizontal battery traced as a single path from the top center, clockwise and around the terminal nub,
-/// so trimming it fills the outline the way a ring gauge fills from 12 o'clock.
-struct BatteryOutline: Shape {
-    /// Share of the width taken by the nub on the right.
-    static let nubFraction = 0.08
-
-    func path(in rect: CGRect) -> Path {
-        let nubWidth = rect.width * Self.nubFraction
-        let body = CGRect(x: rect.minX, y: rect.minY, width: rect.width - nubWidth, height: rect.height)
-        let radius = body.height * 0.28
-        let nubTop = body.midY - body.height * 0.2
-        let nubBottom = body.midY + body.height * 0.2
-        let nubRadius = nubWidth * 0.6
-
-        var path = Path()
-        path.move(to: CGPoint(x: body.midX, y: body.minY))
-        path.addArc(
-            tangent1End: CGPoint(x: body.maxX, y: body.minY),
-            tangent2End: CGPoint(x: body.maxX, y: body.maxY),
-            radius: radius
-        )
-        path.addLine(to: CGPoint(x: body.maxX, y: nubTop))
-        path.addArc(
-            tangent1End: CGPoint(x: rect.maxX, y: nubTop),
-            tangent2End: CGPoint(x: rect.maxX, y: nubBottom),
-            radius: nubRadius
-        )
-        path.addArc(
-            tangent1End: CGPoint(x: rect.maxX, y: nubBottom),
-            tangent2End: CGPoint(x: body.maxX, y: nubBottom),
-            radius: nubRadius
-        )
-        path.addLine(to: CGPoint(x: body.maxX, y: nubBottom))
-        path.addArc(
-            tangent1End: CGPoint(x: body.maxX, y: body.maxY),
-            tangent2End: CGPoint(x: body.minX, y: body.maxY),
-            radius: radius
-        )
-        path.addArc(
-            tangent1End: CGPoint(x: body.minX, y: body.maxY),
-            tangent2End: CGPoint(x: body.minX, y: body.minY),
-            radius: radius
-        )
-        path.addArc(
-            tangent1End: CGPoint(x: body.minX, y: body.minY),
-            tangent2End: CGPoint(x: body.midX, y: body.minY),
-            radius: radius
-        )
-        path.closeSubpath()
-        return path
-    }
+/// Fractions of the complication's side, laid out in the dual battery designer on the 41mm canvas.
+private enum Layout {
+    /// The ring's outer edge is the complication's edge.
+    static let thickness = 0.067
+    /// Space between the two halves at 3 and 9 o'clock, about 1.3 pt on a 41mm watch.
+    static let gap = 0.03
+    static let fontSize = 0.404
+    static let watchNumberY = 0.326
+    static let phoneNumberY = 0.669
+    /// Room for a percent before it shrinks; "100" needs less than full size.
+    static let textWidth = 0.62
 }
 
 #Preview(as: .accessoryCircular) {
     BatteryComplication()
 } timeline: {
+    BatteryEntry(date: .now, level: 0.39, phone: PhoneBatteryReading(date: .now, level: 0.3, isPluggedIn: false))
     BatteryEntry(date: .now, level: 0.82, phone: PhoneBatteryReading(date: .now, level: 0.64, isPluggedIn: false))
-    BatteryEntry(date: .now, level: 0.35, phone: PhoneBatteryReading(date: .now, level: 1, isPluggedIn: true))
+    BatteryEntry(date: .now, level: 0.35, phone: PhoneBatteryReading(date: .now, level: 0.99, isPluggedIn: true))
     BatteryEntry(date: .now, level: 0.5, phone: PhoneBatteryReading(date: .distantPast, level: 0.4, isPluggedIn: false))
-    BatteryEntry(date: .now, level: 0.82)
-    BatteryEntry(date: .now, level: 0.35)
+    BatteryEntry(date: .now, level: 0.99, phone: PhoneBatteryReading(date: .now, level: 0.08, isPluggedIn: false))
     BatteryEntry(date: .now, level: 0.08)
-    BatteryEntry(date: .now, level: 1)
-    BatteryEntry(date: .now, level: nil)
 }

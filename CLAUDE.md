@@ -5,7 +5,7 @@ Personal Apple Watch app whose real job is three watch-face complications, plus 
 | Complication | Family | Shows | Opens |
 |---|---|---|---|
 | Calendar ("Up Next") | `accessoryRectangular` | next event: time, title, location / "+N more" | `CalendarScreen` (rest of today + tomorrow) |
-| Battery ("Battery Outline") | `accessoryCircular` | watch percent inside a battery outline that fills like a ring; iPhone percent below (dimmed after an hour) | `BatteryScreen` (level, time to empty / full, iPhone battery) |
+| Battery ("Battery Rings") | `accessoryCircular` | a ring split in two halves that both fill from 9 o'clock: watch on top (clockwise) with its percent above, iPhone on the bottom (counter-clockwise) with its percent below (dimmed after an hour) | `BatteryScreen` (level, time to empty / full, iPhone battery) |
 | Weather ("Temperature") | `accessoryCircular` | current temp on a low→high ring, condition symbol | `WeatherScreen` (current, hourly, daily) |
 
 ## How taps reach a screen

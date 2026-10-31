@@ -23,15 +23,16 @@ struct WeatherTimelineEntry: TimelineEntry {
     var hasLocation = true
 }
 
-/// Fetches every 30 minutes (the system may stretch that) and fills the gap with the hourly forecast.
-/// When a fetch fails, the forecast from the last good one is shown instead.
+/// Reloads every hour (the system may stretch that) and fills the gap with the hourly forecast. The forecast is the
+/// one `WeatherSnapshot` shares with Up Next, so a reload often fetches nothing. When a fetch fails, the last good
+/// one is shown instead.
 struct WeatherProvider: TimelineProvider {
     func placeholder(in _: Context) -> WeatherTimelineEntry {
         WeatherTimelineEntry(date: .now, weather: WeatherEntry.samples[0])
     }
 
     func getSnapshot(in context: Context, completion: @escaping @Sendable (WeatherTimelineEntry) -> Void) {
-        let cached = WeatherForecast.cached(after: .now).first
+        let cached = WeatherSnapshot.cached().flatMap { WeatherForecast.entries(from: $0).first }
         completion(
             cached.map { WeatherTimelineEntry(date: .now, weather: $0) }
                 ?? (context.isPreview ? placeholder(in: context) : WeatherTimelineEntry(date: .now, weather: nil))
@@ -42,19 +43,15 @@ struct WeatherProvider: TimelineProvider {
         Task {
             let now = Date.now
             var forecast: [WeatherEntry] = []
-            let location = await Location.current()
-            if let location {
-                do {
-                    forecast = try await WeatherForecast.entries(for: location, now: now)
-                    WeatherForecast.save(forecast)
-                } catch {
-                    forecast = WeatherForecast.cached(after: now)
-                }
+            let location = PhoneLocation.saved()
+            if let location,
+               let snapshot = await (try? WeatherSnapshot.latest(for: location, now: now)) ?? WeatherSnapshot.cached() {
+                forecast = WeatherForecast.entries(from: snapshot, now: now)
             }
             let entries = forecast.isEmpty
                 ? [WeatherTimelineEntry(date: now, weather: nil, hasLocation: location != nil)]
                 : forecast.map { WeatherTimelineEntry(date: max($0.date, now), weather: $0) }
-            let retry: TimeInterval = forecast.isEmpty ? 15 * 60 : 30 * 60
+            let retry: TimeInterval = forecast.isEmpty ? 15 * 60 : 60 * 60
             completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(retry))))
         }
     }

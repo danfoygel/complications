@@ -17,7 +17,7 @@ settings:
     CURRENT_PROJECT_VERSION: "4"
 
 targets:
-  # iPhone companion. Its only job is getting the phone's battery level to the watch.
+  # iPhone companion. Its only job is getting the phone's battery level and location to the watch.
   Complications:
     type: application
     platform: iOS
@@ -43,6 +43,7 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Sends your location to your Apple Watch for its weather.
 
   # Tapping a complication opens this app on that complication's screen.
   ComplicationsWatch:
@@ -74,7 +75,6 @@ targets:
         INFOPLIST_KEY_WKApplication: YES
         INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.danfoygel.complications
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Shows your next event on the watch face.
-        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Shows the weather where you are.
 
   ComplicationsWidgets:
     type: app-extension
@@ -93,7 +93,6 @@ targets:
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        NSWidgetWantsLocation: true
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
@@ -102,7 +101,6 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Complications
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Shows your next event on the watch face.
-        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Shows the weather where you are.
 
   # Hostless logic tests: Shared/ and Connectivity/ are compiled straight into the bundle.
   ComplicationsTests:

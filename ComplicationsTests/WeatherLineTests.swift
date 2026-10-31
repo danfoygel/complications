@@ -57,6 +57,25 @@ struct WeatherLineTests {
         #expect(line?.sun != nil)
     }
 
+    @Test func dryDaysChangeOnlyAtSunriseAndSunset() {
+        let changes = WeatherLine.changes(after: start, forecast: forecast(hours: 30))
+        #expect(changes.count == 6)
+    }
+
+    @Test func rainAheadChangesOnlyWhenItsWordingDoes() {
+        let rainy = forecast(hours: 30, rainFrom: 3)
+        let marks = WeatherLine.changes(after: start, forecast: rainy).dropLast(6)
+        // "in 3h" until it rounds to "in 2h", "in 1h", then 5-minute steps under the hour, then "for 1h" and dry: far
+        // fewer than the 144 five-minute marks in 12 hours, and each reads differently from the one before.
+        #expect(marks.count > 5 && marks.count < 30)
+        var previous = WeatherLine(at: start, forecast: rainy)?.outlook?.text
+        for mark in marks {
+            let text = WeatherLine(at: mark, forecast: rainy)?.outlook?.text
+            #expect(text != previous)
+            previous = text
+        }
+    }
+
     @Test func nothingToShowIsNil() {
         let empty = PrecipitationForecast(minutes: [], hours: [], days: [])
         #expect(WeatherLine(at: start, forecast: empty) == nil)

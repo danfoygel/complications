@@ -24,6 +24,29 @@ struct WeatherLine: Equatable, Sendable {
             return nil
         }
     }
+
+    /// The times after `now` when the line from `forecast` changes: each sunrise and sunset, and each 5-minute mark
+    /// within the `precipitationWindow` where the rain or snow reads differently from the mark before. Every other
+    /// mark would be an entry that looks just like the last, which the watch still has to render.
+    static func changes(after now: Date, forecast: PrecipitationForecast) -> [Date] {
+        let step: TimeInterval = 5 * 60
+        let firstMark = (now.timeIntervalSinceReferenceDate / step).rounded(.up) * step
+        // What the right side reads; the outlook itself holds exact intervals, which differ at every mark.
+        func reading(at date: Date) -> String? {
+            WeatherLine(at: date, forecast: forecast)?.outlook.map { "\($0.kind.rawValue) \($0.text)" }
+        }
+        var shown = reading(at: now)
+        var marks: [Date] = []
+        for index in 0 ..< Int(WeatherForecast.precipitationWindow / step) {
+            let mark = Date(timeIntervalSinceReferenceDate: firstMark + Double(index) * step)
+            let current = reading(at: mark)
+            if current != shown {
+                marks.append(mark)
+                shown = current
+            }
+        }
+        return marks + forecast.days.flatMap { [$0.sunrise, $0.sunset].compactMap(\.self) }
+    }
 }
 
 /// Times as Up Next shows them: the locale's format without AM/PM, which takes too much width.

@@ -1,8 +1,10 @@
+import CoreLocation
 import Foundation
 import UIKit
 import WatchConnectivity
 
-/// The phone's side of WatchConnectivity: answers the watch's requests for a reading and pushes readings to it.
+/// The phone's side of WatchConnectivity: answers the watch's requests for a reading and pushes readings to it,
+/// each with the phone's location for the watch's weather.
 final class WatchLink: NSObject, WCSessionDelegate, Sendable {
     static let shared = WatchLink()
 
@@ -21,8 +23,9 @@ final class WatchLink: NSObject, WCSessionDelegate, Sendable {
         case sent(woke: Bool)
     }
 
-    /// Sends the current reading. A complication transfer, which wakes the watch app and is limited to about 50 a
-    /// day, only goes out when the percent or charger state has changed since the last one.
+    /// Sends the current reading and location. A complication transfer, which wakes the watch app and is limited to
+    /// about 50 a day, only goes out when the percent or charger state has changed since the last one, or the phone
+    /// has moved `PhoneLocation.significantDistance`.
     @discardableResult
     @MainActor func send() async -> Outcome {
         start()
@@ -32,15 +35,20 @@ final class WatchLink: NSObject, WCSessionDelegate, Sendable {
         guard session.activationState == .activated, session.isPaired else { return .noWatch }
         guard session.isWatchAppInstalled else { return .noWatchApp }
 
-        try? session.updateApplicationContext(reading.message)
+        let location = PhoneLocation.current()
+        let message = reading.message.merging(location?.message ?? [:]) { first, _ in first }
+        try? session.updateApplicationContext(message)
         let last = Sent.lastTransfer
         let changed = last?.percent != reading.percent || last?.isPluggedIn != reading.isPluggedIn
+            || location.map { $0.isFar(from: Sent.lastTransferLocation) } ?? false
         let woke = changed && session.isComplicationEnabled && session.remainingComplicationUserInfoTransfers > 0
         if woke {
-            session.transferCurrentComplicationUserInfo(reading.message)
+            session.transferCurrentComplicationUserInfo(message)
             Sent.lastTransfer = reading
+            Sent.lastTransferLocation = location ?? Sent.lastTransferLocation
         }
         Sent.last = reading
+        Sent.lastLocation = location ?? Sent.lastLocation
         return .sent(woke: woke)
     }
 
@@ -85,10 +93,12 @@ final class WatchLink: NSObject, WCSessionDelegate, Sendable {
         guard PhoneBatteryReading.isRequest(message) else { return replyHandler([:]) }
         // Delegate calls come on a background queue; UIDevice needs the main thread.
         let reading = DispatchQueue.main.sync { MainActor.assumeIsolated { PhoneBatteryReading.current() } }
+        let location = PhoneLocation.current()
         if let reading {
             Sent.last = reading
         }
-        replyHandler(reading?.message ?? [:])
+        Sent.lastLocation = location ?? Sent.lastLocation
+        replyHandler((reading?.message ?? [:]).merging(location?.message ?? [:]) { first, _ in first })
     }
 }
 
@@ -107,6 +117,18 @@ extension PhoneBatteryReading {
     }
 }
 
+extension PhoneLocation {
+    /// The system's latest fix, which other apps and the system keep fresh; reading it never starts the GPS, so it
+    /// works in the background with When In Use access. `nil` without location access.
+    static func current() -> PhoneLocation? {
+        let manager = CLLocationManager()
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse: return manager.location.map(PhoneLocation.init)
+        default: return nil
+        }
+    }
+}
+
 /// Readings the phone has sent, kept in the phone app's own defaults.
 enum Sent {
     /// The last reading sent by any route, shown in the phone app.
@@ -121,12 +143,23 @@ enum Sent {
         set { store(newValue, "lastTransfer") }
     }
 
-    private static func load(_ key: String) -> PhoneBatteryReading? {
-        UserDefaults.standard.data(forKey: key)
-            .flatMap { try? JSONDecoder().decode(PhoneBatteryReading.self, from: $0) }
+    /// The last location sent by any route.
+    static var lastLocation: PhoneLocation? {
+        get { load("lastLocation") }
+        set { store(newValue, "lastLocation") }
     }
 
-    private static func store(_ reading: PhoneBatteryReading?, _ key: String) {
-        UserDefaults.standard.set(reading.flatMap { try? JSONEncoder().encode($0) }, forKey: key)
+    /// The location in the last complication transfer, so a small move doesn't spend another.
+    static var lastTransferLocation: PhoneLocation? {
+        get { load("lastTransferLocation") }
+        set { store(newValue, "lastTransferLocation") }
+    }
+
+    private static func load<Value: Decodable>(_ key: String) -> Value? {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(Value.self, from: $0) }
+    }
+
+    private static func store(_ value: (some Encodable)?, _ key: String) {
+        UserDefaults.standard.set(value.flatMap { try? JSONEncoder().encode($0) }, forKey: key)
     }
 }

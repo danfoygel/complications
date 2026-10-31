@@ -1,4 +1,3 @@
-import CoreLocation
 import SwiftUI
 import WeatherKit
 import WidgetKit
@@ -72,24 +71,25 @@ struct WeatherScreen: View {
     }
 
     private func load() async {
-        let wasAuthorized = Location.isAuthorized
-        await LocationPermission().request()
-        guard let location = await Location.current() else {
-            phase = .failed("Allow location access in Settings › Privacy & Security › Location Services.")
+        // Until the phone has sent a location, ask it for one now.
+        if PhoneLocation.saved() == nil {
+            _ = await PhoneLink.shared.refresh(maxAge: 0)
+        }
+        guard let location = PhoneLocation.saved() else {
+            phase = .failed("Open Complications on the iPhone and allow location access to see the weather here.")
             return
         }
-        if Location.isAuthorized != wasAuthorized {
-            Route.weather.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
-        }
+        let previous = WeatherSnapshot.cached()?.date
         do {
-            let (current, hourly, daily) = try await WeatherService.shared.weather(
-                for: location,
-                including: .current, .hourly, .daily
+            let snapshot = try await WeatherSnapshot.latest(for: location)
+            // A new fetch: hand it to the complications, which may have failed their own and be waiting to retry.
+            // Reloads asked for while the app is in front don't count against their budget.
+            if snapshot.date != previous {
+                Route.weather.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
+            }
+            phase = await .loaded(
+                snapshot.current, snapshot.hourly, snapshot.daily, try? WeatherService.shared.attribution
             )
-            // Hand the forecast to the complication, which may have failed its own fetch and be waiting to retry.
-            WeatherForecast.save(WeatherForecast.entries(current: current, hourly: hourly, daily: daily))
-            WidgetCenter.shared.reloadTimelines(ofKind: Route.weather.widgetKind)
-            phase = await .loaded(current, hourly, daily, try? WeatherService.shared.attribution)
         } catch {
             // The domain and code, which `localizedDescription` buries, say which WeatherKit check failed.
             let nsError = error as NSError

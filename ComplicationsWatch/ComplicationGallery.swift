@@ -27,7 +27,7 @@
                     battery(0.82, phone: nil)
                 }
             }
-            VStack(spacing: 4) {
+            VStack(spacing: 2) {
                 ForEach(Array(Self.weatherLines.enumerated()), id: \.offset) { _, line in
                     WeatherLineView(line: line).frame(width: 162)
                 }
@@ -38,13 +38,18 @@
             .background(.black)
         }
 
-        /// Up Next's weather line at the 41mm rectangular width: sunset and rain, sunrise and snow, sun only.
+        /// Up Next's weather line at the 41mm rectangular width: rain ahead, snow falling, rain only later in the week,
+        /// dry with unhealthy air.
         private static let weatherLines: [WeatherLine] = [
             WeatherLine(
-                sun: .init(isSunrise: false, date: .now), outlook: .init(kind: .rain, timing: .startsIn(3 * 3600))
+                total: .init(kind: .rain, amount: 10), outlook: .init(kind: .rain, timing: .startsIn(3 * 3600))
             ),
-            WeatherLine(sun: .init(isSunrise: true, date: .now), outlook: .init(kind: .snow, timing: .lastsPastWindow)),
-            WeatherLine(sun: .init(isSunrise: false, date: .now), outlook: nil),
+            WeatherLine(total: .init(kind: .snow, amount: 76), outlook: .init(kind: .snow, timing: .lastsPastWindow)),
+            WeatherLine(
+                sun: .init(isSunrise: false, date: .now),
+                outlook: .init(kind: .rain, timing: .onDay(.now.addingTimeInterval(3 * 24 * 3600)))
+            ),
+            WeatherLine(sun: .init(isSunrise: true, date: .now), airQuality: 164),
         ]
 
         private var bounds: some View {

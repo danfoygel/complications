@@ -1,7 +1,8 @@
 import SwiftUI
 import WidgetKit
 
-/// The next two events, one per line, over a weather line: the next sunrise or sunset and the nearest rain or snow.
+/// The next two events, one per line, over a weather line: with rain or snow ahead, the 24-hour total and when it
+/// starts or stops; otherwise the next sunrise or sunset and the air quality.
 /// One that's on now or starts within the hour leads, large and in its calendar's color. With no forecast, a third
 /// event takes the weather line's place. Text sizes are fixed points for the 41mm watch rather than text styles, so
 /// they don't follow the watch's Text Size setting.
@@ -13,7 +14,7 @@ struct CalendarComplication: Widget {
                 .widgetURL(Route.calendar.url)
         }
         .configurationDisplayName("Up Next")
-        .description("Your next calendar events, sunrise or sunset, and rain or snow.")
+        .description("Your next calendar events, then rain or snow, or sunrise or sunset and air quality.")
         .supportedFamilies([.accessoryRectangular])
     }
 }
@@ -34,8 +35,8 @@ struct CalendarEntry: TimelineEntry {
 
 /// An entry at every start and end in the next week, an hour before each start, and at each midnight, so the
 /// complication moves on as events come within the lead window, begin, and finish, and as days change. For the
-/// weather line, also one at each sunrise and sunset and wherever the rain or snow reads differently in the next 12
-/// hours (`WeatherLine.changes`).
+/// weather line, also one at each sunrise and sunset, each hour of air quality, and wherever the rain or snow reads
+/// differently in the next 12 hours (`WeatherLine.changes`).
 struct CalendarProvider: TimelineProvider {
     /// How far ahead the timeline goes. A reload normally comes every 30 minutes, but the system rations them and can
     /// go a day or more without one; past its last entry the complication would stay on that entry, showing events
@@ -54,7 +55,11 @@ struct CalendarProvider: TimelineProvider {
                 ? placeholder(in: context)
                 : CalendarEntry(
                     date: now, events: events, isAuthorized: CalendarEvents.isAuthorized,
-                    forecast: WeatherSnapshot.cached().map(PrecipitationForecast.init)
+                    forecast: WeatherSnapshot.cached().map {
+                        var forecast = PrecipitationForecast($0)
+                        forecast.airQuality = AirQuality.cached()
+                        return forecast
+                    }
                 )
         )
     }
@@ -84,13 +89,20 @@ struct CalendarProvider: TimelineProvider {
     }
 
     /// The forecast `WeatherSnapshot` shares with the weather complication (fetched only when it's old), else the
-    /// last one saved.
+    /// last one saved, with the air quality (also fetched only when it's old).
     private static func forecast() async -> PrecipitationForecast? {
         var snapshot: WeatherSnapshot?
+        var airQuality = AirQuality.cached()
         if let location = PhoneLocation.saved() {
+            async let latestAirQuality = AirQuality.latest(for: location)
             snapshot = try? await WeatherSnapshot.latest(for: location)
+            airQuality = await latestAirQuality
         }
-        return (snapshot ?? WeatherSnapshot.cached()).map(PrecipitationForecast.init)
+        return (snapshot ?? WeatherSnapshot.cached()).map {
+            var forecast = PrecipitationForecast($0)
+            forecast.airQuality = airQuality
+            return forecast
+        }
     }
 }
 

@@ -2,7 +2,7 @@ import CoreLocation
 import Foundation
 
 /// The US Air Quality Index for one hour.
-struct AirQualityReading: Codable, Sendable {
+struct AirQualityReading: Codable, Equatable, Sendable {
     /// The start of the hour.
     var date: Date
     var aqi: Int
@@ -60,15 +60,44 @@ enum AirQuality {
         }
     }
 
+    /// A saved fetch this recent is used rather than fetching again. Up Next reloads every 30 minutes, so this makes
+    /// about one fetch an hour.
+    static let maxAge: TimeInterval = 50 * 60
+
+    /// The saved readings when they're recent and from about the same place, else new ones, saved. When the fetch
+    /// fails, the saved ones from about the same place, however old (they cover two days); else none.
+    static func latest(for location: PhoneLocation, now: Date = .now) async -> [AirQualityReading] {
+        let saved = Saved.load()
+        let nearby = saved.flatMap { location.isFar(from: $0.location) ? nil : $0 }
+        if let nearby, now.timeIntervalSince(nearby.date) < maxAge {
+            return nearby.readings
+        }
+        guard let readings = try? await fetch(for: location.location) else { return nearby?.readings ?? [] }
+        Saved(date: now, location: location, readings: readings).save()
+        return readings
+    }
+
+    /// The last fetch's readings, wherever they were for.
     static func cached(in defaults: UserDefaults = AppGroup.defaults) -> [AirQualityReading] {
-        defaults.data(forKey: cacheKey).flatMap { try? JSONDecoder().decode([AirQualityReading].self, from: $0) } ?? []
+        Saved.load(from: defaults)?.readings ?? []
     }
 
-    static func save(_ readings: [AirQualityReading], in defaults: UserDefaults = AppGroup.defaults) {
-        defaults.set(try? JSONEncoder().encode(readings), forKey: cacheKey)
-    }
+    /// One fetch, saved in the app group.
+    private struct Saved: Codable {
+        var date: Date
+        var location: PhoneLocation
+        var readings: [AirQualityReading]
 
-    private static let cacheKey = "airQuality"
+        private static let key = "airQuality"
+
+        static func load(from defaults: UserDefaults = AppGroup.defaults) -> Saved? {
+            defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) }
+        }
+
+        func save(in defaults: UserDefaults = AppGroup.defaults) {
+            defaults.set(try? JSONEncoder().encode(self), forKey: Self.key)
+        }
+    }
 }
 
 private struct OpenMeteoResponse: Decodable {

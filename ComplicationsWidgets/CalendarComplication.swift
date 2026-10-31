@@ -28,9 +28,14 @@ struct CalendarEntry: TimelineEntry {
     }
 }
 
-/// An entry at every start and end in the next day, and an hour before each start, so the complication moves on as
-/// events come within the lead window, begin, and finish.
+/// An entry at every start and end in the next week, an hour before each start, and at each midnight, so the
+/// complication moves on as events come within the lead window, begin, and finish, and as days change.
 struct CalendarProvider: TimelineProvider {
+    /// How far ahead the timeline goes. A reload normally comes every 30 minutes, but the system rations them and can
+    /// go a day or more without one; past its last entry the complication would stay on that entry, showing events
+    /// that have ended. A week of entries keeps it right until the next reload comes.
+    static let horizon: TimeInterval = 7 * 24 * 60 * 60
+
     func placeholder(in _: Context) -> CalendarEntry {
         CalendarEntry(date: .now, events: CalendarEvent.samples, isAuthorized: true)
     }
@@ -47,12 +52,14 @@ struct CalendarProvider: TimelineProvider {
 
     func getTimeline(in _: Context, completion: @escaping @Sendable (Timeline<CalendarEntry>) -> Void) {
         let now = Date.now
-        let horizon = now.addingTimeInterval(24 * 60 * 60)
+        let horizon = now.addingTimeInterval(Self.horizon)
         // Look past the horizon so an entry near its end can still find the event after.
         let events = CalendarEvents.events(from: now, to: horizon.addingTimeInterval(24 * 60 * 60))
-        let midnight = Calendar.current.startOfDay(for: now).addingTimeInterval(24 * 60 * 60)
+        // A later day's events show their weekday, so each midnight changes what's shown.
+        let today = Calendar.current.startOfDay(for: now)
+        let midnights = (1 ... 8).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: today) }
         let changes = Set(events.flatMap { [$0.start.addingTimeInterval(-CalendarEvents.leadWindow), $0.start, $0.end] }
-            + [midnight]).filter { $0 > now && $0 <= horizon }
+            + midnights).filter { $0 > now && $0 <= horizon }
         let entries = ([now] + changes.sorted()).map {
             CalendarEntry(date: $0, events: events, isAuthorized: CalendarEvents.isAuthorized)
         }
@@ -111,7 +118,7 @@ struct CalendarComplicationView: View {
                 .font(.headline)
                 .widgetAccentable()
             Spacer(minLength: 0)
-            Text(event.start <= entry.date ? "until \(time(event.end))" : time(event.start))
+            Text(event.start <= entry.date ? "until \(clock(event.end))" : clock(event.start))
                 .font(.footnote.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -119,15 +126,35 @@ struct CalendarComplicationView: View {
         }
     }
 
-    /// "11:30", "Now", or the weekday for a later day.
+    /// "Now", or when it starts.
     private func label(_ event: CalendarEvent) -> String {
-        if event.start <= entry.date {
-            return "Now"
+        event.start <= entry.date ? "Now" : clock(event.start)
+    }
+
+    /// "11:30" today, with the weekday later this week ("Sat 1pm", "Sat 1:30pm", "Sat 13:30"), or just the date a week
+    /// or more away ("Nov 6"), where a weekday would read as this one.
+    private func clock(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let days = calendar.dateComponents(
+            [.day], from: calendar.startOfDay(for: entry.date), to: calendar.startOfDay(for: date)
+        ).day ?? 0
+        if days == 0 {
+            return time(date)
         }
-        if Calendar.current.isDate(event.start, inSameDayAs: entry.date) {
-            return time(event.start)
+        if days >= 7 {
+            return date.formatted(.dateTime.month(.abbreviated).day())
         }
-        return event.start.formatted(.dateTime.weekday())
+        let formatter = DateFormatter()
+        if Self.timeFormat.contains("h") {
+            // Without the space before AM/PM, and without ":00", to fit beside the title.
+            let onTheHour = calendar.component(.minute, from: date) == 0
+            formatter.dateFormat = onTheHour ? "EEE ha" : "EEE h:mma"
+            formatter.amSymbol = "am"
+            formatter.pmSymbol = "pm"
+        } else {
+            formatter.dateFormat = "EEE " + Self.timeFormat
+        }
+        return formatter.string(from: date)
     }
 
     /// The locale's time format without AM/PM, which takes too much width: "9:05", or "09:05" in 24-hour locales.

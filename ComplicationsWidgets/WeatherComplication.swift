@@ -1,7 +1,7 @@
 import SwiftUI
 import WidgetKit
 
-/// Current temperature on a ring that runs from the day's low to its high, with the condition symbol below.
+/// Current temperature and the next high or low inside a 12-hour clock ring that marks when rain or snow is due.
 struct WeatherComplication: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: Route.weather.widgetKind, provider: WeatherProvider()) { entry in
@@ -10,7 +10,7 @@ struct WeatherComplication: Widget {
                 .widgetURL(Route.weather.url)
         }
         .configurationDisplayName("Temperature")
-        .description("Current temperature within today's low and high.")
+        .description("Current temperature, the next high or low, and rain or snow in the next 12 hours.")
         .supportedFamilies([.accessoryCircular])
     }
 }
@@ -27,7 +27,7 @@ struct WeatherTimelineEntry: TimelineEntry {
 /// When a fetch fails, the forecast from the last good one is shown instead.
 struct WeatherProvider: TimelineProvider {
     func placeholder(in _: Context) -> WeatherTimelineEntry {
-        WeatherTimelineEntry(date: .now, weather: .sample)
+        WeatherTimelineEntry(date: .now, weather: WeatherEntry.samples[0])
     }
 
     func getSnapshot(in context: Context, completion: @escaping @Sendable (WeatherTimelineEntry) -> Void) {
@@ -65,14 +65,7 @@ struct WeatherComplicationView: View {
 
     var body: some View {
         if let weather = entry.weather {
-            Gauge(value: weather.temperature, in: weather.low ... max(weather.high, weather.low + 1)) {
-                Image(systemName: weather.symbolName)
-            } currentValueLabel: {
-                Text(Temperature.text(weather.temperature))
-                    .monospacedDigit()
-            }
-            .gaugeStyle(.accessoryCircular)
-            .widgetAccentable()
+            PrecipitationClock(weather: weather)
         } else {
             ZStack {
                 AccessoryWidgetBackground()
@@ -83,21 +76,13 @@ struct WeatherComplicationView: View {
     }
 }
 
-extension WeatherEntry {
-    static let sample = WeatherEntry(
-        date: .now,
-        temperature: 18,
-        low: 11,
-        high: 22,
-        symbolName: "cloud.sun",
-        condition: "Partly Cloudy"
-    )
-}
-
 #Preview(as: .accessoryCircular) {
     WeatherComplication()
 } timeline: {
-    WeatherTimelineEntry(date: .now, weather: .sample)
+    WeatherTimelineEntry(date: .now, weather: WeatherEntry.samples[0])
+    WeatherTimelineEntry(date: .now, weather: WeatherEntry.samples[1])
+    WeatherTimelineEntry(date: .now, weather: WeatherEntry.samples[2])
+    WeatherTimelineEntry(date: .now, weather: WeatherEntry.samples[3])
     WeatherTimelineEntry(date: .now, weather: nil)
     WeatherTimelineEntry(date: .now, weather: nil, hasLocation: false)
 }

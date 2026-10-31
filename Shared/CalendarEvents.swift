@@ -55,9 +55,15 @@ enum CalendarEvents {
     /// How soon an event has to start to become the lead.
     static let leadWindow: TimeInterval = 60 * 60
 
-    /// Up to `lines` timed events to show at `date`, from `events` sorted by start. All-day events are never shown.
+    /// Events longer than this are effectively all-day ones (a trip, a conference), so they're left out too.
+    static let longestShown: TimeInterval = 12 * 60 * 60
+
+    /// Up to `lines` timed events to show at `date`, from `events` sorted by start. All-day events and ones longer
+    /// than `longestShown` are never shown.
     static func upNext(at date: Date, in events: [CalendarEvent], lines: Int = 3) -> UpNext {
-        let timed = events.filter { !$0.isAllDay && $0.end > date }
+        let timed = events.filter {
+            !$0.isAllDay && $0.end.timeIntervalSince($0.start) <= longestShown && $0.end > date
+        }
         let lead = timed.first.flatMap { $0.start <= date.addingTimeInterval(leadWindow) ? $0 : nil }
         let rest = timed.dropFirst(lead == nil ? 0 : 1)
         return UpNext(lead: lead, rest: Array(rest.prefix(lead == nil ? lines : lines - 1)))

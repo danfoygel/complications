@@ -28,9 +28,14 @@ struct CalendarEntry: TimelineEntry {
     }
 }
 
-/// An entry at every start and end in the next day, and an hour before each start, so the complication moves on as
-/// events come within the lead window, begin, and finish.
+/// An entry at every start and end in the next week, an hour before each start, and at each midnight, so the
+/// complication moves on as events come within the lead window, begin, and finish, and as days change.
 struct CalendarProvider: TimelineProvider {
+    /// How far ahead the timeline goes. A reload normally comes every 30 minutes, but the system rations them and can
+    /// go a day or more without one; past its last entry the complication would stay on that entry, showing events
+    /// that have ended. A week of entries keeps it right until the next reload comes.
+    static let horizon: TimeInterval = 7 * 24 * 60 * 60
+
     func placeholder(in _: Context) -> CalendarEntry {
         CalendarEntry(date: .now, events: CalendarEvent.samples, isAuthorized: true)
     }
@@ -47,12 +52,14 @@ struct CalendarProvider: TimelineProvider {
 
     func getTimeline(in _: Context, completion: @escaping @Sendable (Timeline<CalendarEntry>) -> Void) {
         let now = Date.now
-        let horizon = now.addingTimeInterval(24 * 60 * 60)
+        let horizon = now.addingTimeInterval(Self.horizon)
         // Look past the horizon so an entry near its end can still find the event after.
         let events = CalendarEvents.events(from: now, to: horizon.addingTimeInterval(24 * 60 * 60))
-        let midnight = Calendar.current.startOfDay(for: now).addingTimeInterval(24 * 60 * 60)
+        // A later day's events show their weekday, so each midnight changes what's shown.
+        let today = Calendar.current.startOfDay(for: now)
+        let midnights = (1 ... 8).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: today) }
         let changes = Set(events.flatMap { [$0.start.addingTimeInterval(-CalendarEvents.leadWindow), $0.start, $0.end] }
-            + [midnight]).filter { $0 > now && $0 <= horizon }
+            + midnights).filter { $0 > now && $0 <= horizon }
         let entries = ([now] + changes.sorted()).map {
             CalendarEntry(date: $0, events: events, isAuthorized: CalendarEvents.isAuthorized)
         }
@@ -71,17 +78,18 @@ struct CalendarComplicationView: View {
                 if let lead = upNext.lead {
                     leadRow(lead)
                 }
-                Grid(alignment: .leading, horizontalSpacing: 5, verticalSpacing: 1) {
-                    ForEach(upNext.rest) { event in
-                        GridRow {
-                            Text(label(event))
-                                .font(.footnote.weight(.semibold))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                            Text(event.title)
-                                .font(.body.weight(.medium))
-                                .foregroundStyle(upNext.lead == nil ? .primary : .secondary)
-                        }
+                // Each title starts right after its own label rather than in a column, so it gets all the width
+                // that row's label leaves.
+                ForEach(upNext.rest) { event in
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(label(event))
+                            .font(.footnote.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .fixedSize()
+                        FittedText(event.title)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(upNext.lead == nil ? .primary : .secondary)
                     }
                 }
             }
@@ -107,11 +115,11 @@ struct CalendarComplicationView: View {
                 .fill(Color(event.color))
                 .frame(width: 4, height: 18)
                 .widgetAccentable()
-            Text(event.title)
+            FittedText(event.title)
                 .font(.headline)
                 .widgetAccentable()
             Spacer(minLength: 0)
-            Text(event.start <= entry.date ? "until \(time(event.end))" : time(event.start))
+            Text(event.start <= entry.date ? "until \(clock(event.end))" : clock(event.start))
                 .font(.footnote.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -119,15 +127,36 @@ struct CalendarComplicationView: View {
         }
     }
 
-    /// "11:30", "Now", or the weekday for a later day.
+    /// "Now", or when it starts.
     private func label(_ event: CalendarEvent) -> String {
-        if event.start <= entry.date {
-            return "Now"
+        event.start <= entry.date ? "Now" : clock(event.start)
+    }
+
+    /// "11:30" today, with the weekday later this week ("Sa 1pm", "Sa 1:30pm", "Sa 13:30"), or just the date a week
+    /// or more away ("Nov 6"), where a weekday would read as this one.
+    private func clock(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let days = calendar.dateComponents(
+            [.day], from: calendar.startOfDay(for: entry.date), to: calendar.startOfDay(for: date)
+        ).day ?? 0
+        if days == 0 {
+            return time(date)
         }
-        if Calendar.current.isDate(event.start, inSameDayAs: entry.date) {
-            return time(event.start)
+        if days >= 7 {
+            return date.formatted(.dateTime.month(.abbreviated).day())
         }
-        return event.start.formatted(.dateTime.weekday())
+        let formatter = DateFormatter()
+        if Self.timeFormat.contains("h") {
+            // Without the space before AM/PM, and without ":00", to fit beside the title.
+            let onTheHour = calendar.component(.minute, from: date) == 0
+            // The two-letter weekday ("EEEEEE") for the same reason.
+            formatter.dateFormat = onTheHour ? "EEEEEE ha" : "EEEEEE h:mma"
+            formatter.amSymbol = "am"
+            formatter.pmSymbol = "pm"
+        } else {
+            formatter.dateFormat = "EEEEEE " + Self.timeFormat
+        }
+        return formatter.string(from: date)
     }
 
     /// The locale's time format without AM/PM, which takes too much width: "9:05", or "09:05" in 24-hour locales.
@@ -144,6 +173,37 @@ struct CalendarComplicationView: View {
     }
 }
 
+/// One line of text cut off at the last whole character that fits, with no "…": on a complication that space is better
+/// spent on another character or two.
+struct FittedText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        // ViewThatFits shows the first that fits the width, so the longest prefix; the last, an empty one, always does.
+        ViewThatFits(in: .horizontal) {
+            ForEach(Self.prefixes(of: text), id: \.self) { prefix in
+                Text(prefix).lineLimit(1)
+            }
+        }
+    }
+
+    /// Every prefix, longest first, without trailing spaces and so without repeats.
+    static func prefixes(of text: String) -> [String] {
+        var prefixes: [String] = []
+        for length in stride(from: text.count, through: 0, by: -1) {
+            let prefix = String(text.prefix(length).trimmingCharacters(in: .whitespaces))
+            if prefix != prefixes.last {
+                prefixes.append(prefix)
+            }
+        }
+        return prefixes
+    }
+}
+
 extension CalendarEvent {
     static let samples = [
         sample(id: "standup", "Standup", minutes: -5, length: 15, color: RGB(red: 0.04, green: 0.52, blue: 1)),
@@ -154,6 +214,14 @@ extension CalendarEvent {
         sample(id: "lunch", "Lunch with Sam", minutes: 145, length: 60, color: RGB(red: 0.19, green: 0.82, blue: 0.35)),
         sample(id: "priya", "1:1 with Priya", minutes: 235, length: 30, color: RGB(red: 0.75, green: 0.35, blue: 0.95)),
     ]
+
+    /// The samples two days later, so they show their weekday.
+    static let laterSamples = samples.map {
+        var event = $0
+        event.start.addTimeInterval(2 * 24 * 60 * 60)
+        event.end.addTimeInterval(2 * 24 * 60 * 60)
+        return event
+    }
 
     private static func sample(id: String, _ title: String, minutes: Double, length: Double, color: RGB) -> Self {
         CalendarEvent(
@@ -177,6 +245,8 @@ extension CalendarEvent {
     CalendarEntry(date: .now.addingTimeInterval(20 * 60), events: CalendarEvent.samples, isAuthorized: true)
     // Review starts within the hour.
     CalendarEntry(date: .now.addingTimeInterval(40 * 60), events: CalendarEvent.samples, isAuthorized: true)
+    // Later this week: each title right after its weekday, cut off without "…".
+    CalendarEntry(date: .now, events: CalendarEvent.laterSamples, isAuthorized: true)
     CalendarEntry(date: .now, events: [], isAuthorized: true)
     CalendarEntry(date: .now, events: [], isAuthorized: false)
 }

@@ -44,11 +44,23 @@ enum CalendarEvents {
             .sorted { ($0.start, $0.end) < ($1.start, $1.end) }
     }
 
-    /// The event to show at `date`: the earliest timed event that hasn't ended, else an all-day event on that day.
-    static func upNext(at date: Date, in events: [CalendarEvent]) -> CalendarEvent? {
-        let calendar = Calendar.current
-        return events.first { !$0.isAllDay && $0.end > date }
-            ?? events.first { $0.isAllDay && calendar.isDate($0.start, inSameDayAs: date) }
+    /// What the complication lists at a moment: one line per event.
+    struct UpNext: Equatable, Sendable {
+        /// The next timed event, when it's on now or starts within `leadWindow`; shown large on the first line.
+        var lead: CalendarEvent?
+        /// The timed events after it that haven't ended.
+        var rest: [CalendarEvent]
+    }
+
+    /// How soon an event has to start to become the lead.
+    static let leadWindow: TimeInterval = 60 * 60
+
+    /// Up to `lines` timed events to show at `date`, from `events` sorted by start. All-day events are never shown.
+    static func upNext(at date: Date, in events: [CalendarEvent], lines: Int = 3) -> UpNext {
+        let timed = events.filter { !$0.isAllDay && $0.end > date }
+        let lead = timed.first.flatMap { $0.start <= date.addingTimeInterval(leadWindow) ? $0 : nil }
+        let rest = timed.dropFirst(lead == nil ? 0 : 1)
+        return UpNext(lead: lead, rest: Array(rest.prefix(lead == nil ? lines : lines - 1)))
     }
 }
 

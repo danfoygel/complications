@@ -4,7 +4,7 @@ Personal Apple Watch app whose real job is three watch-face complications, plus 
 
 | Complication | Family | Shows | Opens |
 |---|---|---|---|
-| Calendar ("Up Next") | `accessoryRectangular` | next event: time, title, location / "+N more" | `CalendarScreen` (rest of today + tomorrow) |
+| Calendar ("Up Next") | `accessoryRectangular` | next three timed events, one per line, never all-day ones (`CalendarEvents.upNext`); one on now or starting within the hour leads, large with its calendar color | `CalendarScreen` (rest of today + tomorrow) |
 | Battery ("Battery Outline") | `accessoryCircular` | watch percent inside a battery outline that fills like a ring; iPhone percent below (dimmed after an hour) | `BatteryScreen` (level, time to empty / full, iPhone battery) |
 | Weather ("Temperature") | `accessoryCircular` | current temp on a low→high ring, condition symbol | `WeatherScreen` (current, hourly, daily) |
 
@@ -49,7 +49,7 @@ ComplicationsTests/      hostless Swift Testing unit tests (watchOS); Shared/ an
 - **Location**: When In Use. `WeatherScreen` prompts through `LocationPermission` (`requestWhenInUseAuthorization`, waiting for the answer before fetching); the extension has `NSWidgetWantsLocation` and uses `CLLocationUpdate.liveUpdates()` with a 10 s timeout, then the cached location.
 - **WeatherKit**: `com.apple.developer.weatherkit` entitlement on both watch targets. WeatherKit must be enabled for both watch App IDs (`com.danfoygel.complications.watchkitapp`, `com.danfoygel.complications.watchkitapp.widgets`) in the developer portal, under both Capabilities and App Services. Without App Services the fetch fails with `WeatherDaemon.WDSJWTAuthenticatorServiceListener.Errors` code 2 (Apple refused the app's token). `WeatherScreen` shows the full error with its domain and code. It usually fails with an auth error in the simulator; test weather on the real watch. `WeatherScreen` shows the Apple Weather attribution (required).
 - **Battery**: `WKInterfaceDevice` battery monitoring. The widget gets reloads roughly every 15 min and fills the gaps with one predicted entry per whole percent (`BatteryForecast`). `BatteryScreen` takes a reading every minute while open and reloads the widget.
-- Widget reload budgets are limited: calendar reloads every 30 min (entries at every event start/end and at midnight), weather every 30 min (hourly forecast entries for 6 h; 15 min retry with nothing to show), battery every 15 min.
+- Widget reload budgets are limited: calendar reloads every 30 min (entries at every event start/end, an hour before each start, and at midnight), weather every 30 min (hourly forecast entries for 6 h; 15 min retry with nothing to show), battery every 15 min.
 
 ## Identifiers
 

@@ -34,7 +34,8 @@ struct CalendarEntry: TimelineEntry {
 
 /// An entry at every start and end in the next week, an hour before each start, and at each midnight, so the
 /// complication moves on as events come within the lead window, begin, and finish, and as days change. For the
-/// weather line, also one every 5 minutes for 12 hours and one at each sunrise and sunset.
+/// weather line, also one at each sunrise and sunset and wherever the rain or snow reads differently in the next 12
+/// hours (`WeatherLine.changes`).
 struct CalendarProvider: TimelineProvider {
     /// How far ahead the timeline goes. A reload normally comes every 30 minutes, but the system rations them and can
     /// go a day or more without one; past its last entry the complication would stay on that entry, showing events
@@ -53,7 +54,7 @@ struct CalendarProvider: TimelineProvider {
                 ? placeholder(in: context)
                 : CalendarEntry(
                     date: now, events: events, isAuthorized: CalendarEvents.isAuthorized,
-                    forecast: PrecipitationForecast.cached()
+                    forecast: WeatherSnapshot.cached().map(PrecipitationForecast.init)
                 )
         )
     }
@@ -71,7 +72,8 @@ struct CalendarProvider: TimelineProvider {
             let eventChanges = events.flatMap {
                 [$0.start.addingTimeInterval(-CalendarEvents.leadWindow), $0.start, $0.end]
             }
-            let changes = Set(eventChanges + midnights + Self.weatherChanges(after: now, forecast: forecast))
+            let weatherChanges = forecast.map { WeatherLine.changes(after: now, forecast: $0) } ?? []
+            let changes = Set(eventChanges + midnights + weatherChanges)
                 .filter { $0 > now && $0 <= horizon }
             let entries = ([now] + changes.sorted()).map {
                 CalendarEntry(date: $0, events: events, isAuthorized: CalendarEvents.isAuthorized, forecast: forecast)
@@ -81,25 +83,14 @@ struct CalendarProvider: TimelineProvider {
         }
     }
 
-    /// A fresh forecast, saved for next time, else the last one saved.
+    /// The forecast `WeatherSnapshot` shares with the weather complication (fetched only when it's old), else the
+    /// last one saved.
     private static func forecast() async -> PrecipitationForecast? {
-        if let location = await Location.current(),
-           let forecast = try? await PrecipitationForecast.fetch(for: location) {
-            forecast.save()
-            return forecast
+        var snapshot: WeatherSnapshot?
+        if let location = PhoneLocation.saved() {
+            snapshot = try? await WeatherSnapshot.latest(for: location)
         }
-        return PrecipitationForecast.cached()
-    }
-
-    /// Every 5-minute mark for 12 hours, so "in 30m" counts down, and each sunrise and sunset.
-    private static func weatherChanges(after now: Date, forecast: PrecipitationForecast?) -> [Date] {
-        guard let forecast else { return [] }
-        let step: TimeInterval = 5 * 60
-        let firstMark = (now.timeIntervalSinceReferenceDate / step).rounded(.up) * step
-        let marks = (0 ..< Int(WeatherForecast.precipitationWindow / step)).map {
-            Date(timeIntervalSinceReferenceDate: firstMark + Double($0) * step)
-        }
-        return marks + forecast.days.flatMap { [$0.sunrise, $0.sunset].compactMap(\.self) }
+        return (snapshot ?? WeatherSnapshot.cached()).map(PrecipitationForecast.init)
     }
 }
 

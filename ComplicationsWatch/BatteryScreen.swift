@@ -46,7 +46,7 @@ struct BatteryScreen: View {
     }
 
     /// Takes a reading now and every minute while the screen is open, adding each to the shared history, and
-    /// asks the phone for its battery each time.
+    /// asks the phone for its battery whenever the saved one is over 5 minutes old.
     private func refresh() async {
         while !Task.isCancelled {
             if let reading = BatteryReading.current() {

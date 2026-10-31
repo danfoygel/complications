@@ -16,14 +16,14 @@ struct TemperatureView: View {
                 // The negative spacing tucks the second line under the temperature's empty descender space.
                 VStack(spacing: -side * 0.04) {
                     Text(Temperature.text(weather.temperature))
-                        .font(.system(size: 20, weight: .bold))
+                        .font(.system(size: 20, weight: .semibold))
                         .tracking(-0.6)
                     if let next = weather.next {
                         HStack(spacing: side * 0.02) {
                             Image(systemName: next.isHigh ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
-                                .font(.system(size: 7, weight: .heavy))
+                                .font(.system(size: 7, weight: .semibold))
                             Text(Temperature.number(next.temperature))
-                                .font(.system(size: 12, weight: .heavy))
+                                .font(.system(size: 12, weight: .semibold))
                         }
                         .foregroundStyle(.white.opacity(0.78))
                     }

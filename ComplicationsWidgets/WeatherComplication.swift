@@ -70,7 +70,7 @@ struct WeatherComplicationView: View {
             ZStack {
                 AccessoryWidgetBackground()
                 Image(systemName: entry.hasLocation ? "icloud.slash" : "location.slash")
-                    .font(.system(size: 19))
+                    .font(.system(size: 19, weight: .semibold))
             }
         }
     }

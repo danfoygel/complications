@@ -14,7 +14,7 @@ struct WeatherEntry: TimelineEntry, Codable, Sendable {
     var condition: String
     /// The next turning point of the temperature: the high still to come, or the low after it. `nil` when unknown.
     var next: TemperatureExtreme?
-    /// Rain or snow expected in the 12 hours from `date`, drawn on the complication's clock ring.
+    /// Rain or snow expected in the 12 hours from `date`.
     var precipitation: [PrecipitationSpan]?
 }
 
@@ -131,17 +131,65 @@ enum WeatherForecast {
     private static let cacheKey = "weatherEntries"
 }
 
+/// The minute, hourly and daily forecasts behind the calendar's weather line (`WeatherLine`), kept so a failed fetch
+/// can fall back on the last good one.
+struct PrecipitationForecast: Codable, Sendable {
+    var minutes: [ForecastMinute]
+    var hours: [ForecastHour]
+    /// For the next day with rain or snow when there's none in the next 12 hours, and the sunrises and sunsets.
+    var days: [ForecastDay]
+
+    /// The minute forecast is only there where WeatherKit has one (the US, the UK, and a few other countries).
+    static func fetch(for location: CLLocation) async throws -> PrecipitationForecast {
+        let (minute, hourly, daily) = try await WeatherService.shared.weather(
+            for: location,
+            including: .minute, .hourly, .daily
+        )
+        return PrecipitationForecast(
+            minutes: minute.map { $0.map(ForecastMinute.init) } ?? [],
+            hours: hourly.map(ForecastHour.init),
+            days: daily.map(ForecastDay.init)
+        )
+    }
+
+    static func cached(in defaults: UserDefaults = AppGroup.defaults) -> PrecipitationForecast? {
+        defaults.data(forKey: cacheKey).flatMap { try? JSONDecoder().decode(PrecipitationForecast.self, from: $0) }
+    }
+
+    func save(in defaults: UserDefaults = AppGroup.defaults) {
+        defaults.set(try? JSONEncoder().encode(self), forKey: Self.cacheKey)
+    }
+
+    private static let cacheKey = "precipitationForecast"
+}
+
+extension PrecipitationSpan.Kind {
+    /// What counts as rain or snow, given what falls and how likely it is.
+    init?(_ precipitation: Precipitation, chance: Double) {
+        guard chance >= WeatherForecast.precipitationThreshold else { return nil }
+        switch precipitation {
+        case .none: return nil
+        case .snow, .sleet, .mixed: self = .snow
+        default: self = .rain
+        }
+    }
+}
+
 extension ForecastHour {
     init(_ hour: HourWeather) {
-        let kind: PrecipitationSpan.Kind? = switch hour.precipitation {
-        case .none: nil
-        case .snow, .sleet, .mixed: .snow
-        default: .rain
-        }
         self.init(
             date: hour.date,
             temperature: hour.temperature.converted(to: .celsius).value,
-            precipitation: hour.precipitationChance >= WeatherForecast.precipitationThreshold ? kind : nil
+            precipitation: PrecipitationSpan.Kind(hour.precipitation, chance: hour.precipitationChance)
+        )
+    }
+}
+
+extension ForecastMinute {
+    init(_ minute: MinuteWeather) {
+        self.init(
+            date: minute.date,
+            precipitation: PrecipitationSpan.Kind(minute.precipitation, chance: minute.precipitationChance)
         )
     }
 }
@@ -151,7 +199,10 @@ extension ForecastDay {
         self.init(
             date: day.date,
             low: day.lowTemperature.converted(to: .celsius).value,
-            high: day.highTemperature.converted(to: .celsius).value
+            high: day.highTemperature.converted(to: .celsius).value,
+            precipitation: PrecipitationSpan.Kind(day.precipitation, chance: day.precipitationChance),
+            sunrise: day.sun.sunrise,
+            sunset: day.sun.sunset
         )
     }
 }

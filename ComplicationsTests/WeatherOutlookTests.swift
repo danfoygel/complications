@@ -129,4 +129,68 @@ struct WeatherOutlookTests {
     @Test func dryForecastHasNoSpans() {
         #expect(WeatherForecast.precipitation(after: start, hours: hours([nil, nil, nil])).isEmpty)
     }
+
+    @Test func minuteForecastTakesOverForTheHourItCovers() {
+        // The hourly forecast says rain all hour; the minute forecast says it holds off until 11:25.
+        let minutes = (0 ..< 60).map {
+            ForecastMinute(date: time(Double($0) / 60), precipitation: $0 >= 25 ? .rain : nil)
+        }
+        let spans = WeatherForecast.precipitation(after: start, minutes: minutes, hours: hours([.rain, .rain, nil]))
+        #expect(spans.count == 1)
+        #expect(spans.first?.start == time(25.0 / 60))
+        #expect(spans.first?.end == time(2))
+    }
+
+    // MARK: Wording
+
+    @Test func dryNowGivesTimeUntilItStarts() {
+        let spans = WeatherForecast.precipitation(after: start, hours: hours([nil, nil, .rain, .rain]))
+        let outlook = WeatherForecast.outlook(at: start, spans: spans)
+        #expect(outlook?.kind == .rain)
+        #expect(outlook?.text == "in 2h")
+    }
+
+    @Test func fallingNowGivesTimeUntilItStops() {
+        let spans = WeatherForecast.precipitation(after: start, hours: hours([.snow, .snow, .snow, .snow, nil]))
+        #expect(WeatherForecast.outlook(at: start, spans: spans)?.text == "for 4h")
+    }
+
+    @Test func fallingAllWindowIsOpenEnded() {
+        let spans = WeatherForecast.precipitation(after: start, hours: hours(Array(repeating: .rain, count: 20)))
+        #expect(WeatherForecast.outlook(at: start, spans: spans)?.text == "for 12h+")
+    }
+
+    @Test func dryWindowHasNoOutlook() {
+        #expect(WeatherForecast.outlook(at: start, spans: []) == nil)
+    }
+
+    private func day(_ offset: Int, _ precipitation: PrecipitationSpan.Kind?) -> ForecastDay {
+        let date = Calendar.current.date(byAdding: .day, value: offset, to: Calendar.current.startOfDay(for: start))!
+        return ForecastDay(date: date, low: 5, high: 15, precipitation: precipitation)
+    }
+
+    @Test func dryWindowNamesTheNextDayWithRainOrSnow() {
+        // Friday the 30th: today's own rain (past the window) is skipped; Tuesday has snow.
+        let days = [day(0, .rain), day(1, nil), day(2, nil), day(3, nil), day(4, .snow), day(5, .rain)]
+        let outlook = WeatherForecast.outlook(at: start, spans: [], days: days)
+        #expect(outlook?.kind == .snow)
+        #expect(outlook?.text == "on Tu")
+    }
+
+    @Test func rainInTheWindowBeatsALaterDay() {
+        let spans = WeatherForecast.precipitation(after: start, hours: hours([nil, .rain]))
+        #expect(WeatherForecast.outlook(at: start, spans: spans, days: [day(1, .snow)])?.text == "in 1h")
+    }
+
+    @Test func dayAWeekOutIsTooFarToName() {
+        #expect(WeatherForecast.outlook(at: start, spans: [], days: [day(7, .rain)]) == nil)
+    }
+
+    @Test func durationsRoundToFiveMinutesThenHours() {
+        #expect(PrecipitationOutlook.duration(60) == "5m")
+        #expect(PrecipitationOutlook.duration(28 * 60) == "30m")
+        #expect(PrecipitationOutlook.duration(58 * 60) == "1h")
+        #expect(PrecipitationOutlook.duration(130 * 60) == "2h")
+        #expect(PrecipitationOutlook.duration(150 * 60) == "3h")
+    }
 }

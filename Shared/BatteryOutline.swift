@@ -49,7 +49,7 @@ struct BatteryComplicationView: View {
 
     private func percent(_ value: Int?, color: Color, centerY: Double, side: Double) -> some View {
         Text(value.map(String.init) ?? "--")
-            .font(.system(size: side * Layout.fontSize, weight: .semibold, design: .rounded))
+            .font(.system(size: Layout.fontSize, weight: .semibold))
             .monospacedDigit()
             .foregroundStyle(color)
             .lineLimit(1)
@@ -118,7 +118,8 @@ private enum Layout {
     static let nubWidth = 0.075
     static let nubHeight = 0.3
     static let bodyMidX = bodyLeft + bodyWidth / 2
-    static let fontSize = 0.315
+    /// In points, not a fraction: the complication's text is sized for the 41mm watch (0.315 of its 44.5 pt side).
+    static let fontSize: CGFloat = 14
     /// Line-box centers that space the two numbers' digits evenly inside the body.
     static let watchNumberY = 0.362
     static let phoneNumberY = 0.625

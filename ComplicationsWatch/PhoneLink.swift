@@ -52,7 +52,7 @@ final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
 
     private func store(_ reading: PhoneBatteryReading) {
         if reading.save() {
-            WidgetCenter.shared.reloadTimelines(ofKind: Route.battery.widgetKind)
+            Route.battery.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
         }
     }
 

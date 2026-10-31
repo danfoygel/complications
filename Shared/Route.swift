@@ -26,6 +26,16 @@ enum Route: String, CaseIterable, Hashable, Sendable {
         case .weather: "WeatherComplication"
         }
     }
+
+    /// Every complication that shows this screen's data, to reload when there's news for them. Up Next has a weather
+    /// line.
+    var widgetKinds: [String] {
+        switch self {
+        case .calendar: [widgetKind]
+        case .battery: [widgetKind]
+        case .weather: [widgetKind, Route.calendar.widgetKind]
+        }
+    }
 }
 
 enum AppGroup {

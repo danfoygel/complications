@@ -1,7 +1,7 @@
 import Foundation
 
 /// A forecast hour reduced to what the complication needs, so the logic below can be tested without WeatherKit.
-struct ForecastHour: Sendable {
+struct ForecastHour: Codable, Sendable {
     /// The start of the hour.
     var date: Date
     /// Celsius.
@@ -10,17 +10,82 @@ struct ForecastHour: Sendable {
     var precipitation: PrecipitationSpan.Kind?
 }
 
-/// A forecast day's low and high, in Celsius.
-struct ForecastDay: Sendable {
+/// A minute of the minute forecast (the next hour, where WeatherKit has one), reduced like `ForecastHour`.
+struct ForecastMinute: Codable, Sendable {
+    var date: Date
+    var precipitation: PrecipitationSpan.Kind?
+}
+
+/// The nearest rain or snow, in words: "in 30m", "for 4h", "for 12h+", "on Tu".
+struct PrecipitationOutlook: Equatable, Sendable {
+    enum Timing: Equatable, Sendable {
+        /// Dry now; it starts after this long.
+        case startsIn(TimeInterval)
+        /// Falling now; it stops after this long.
+        case stopsIn(TimeInterval)
+        /// Falling now and still at the end of the `precipitationWindow`.
+        case lastsPastWindow
+        /// Nothing in the window; the first later day with some.
+        case onDay(Date)
+    }
+
+    var kind: PrecipitationSpan.Kind
+    var timing: Timing
+
+    var text: String {
+        switch timing {
+        case let .startsIn(interval): "in " + Self.duration(interval)
+        case let .stopsIn(interval): "for " + Self.duration(interval)
+        case .lastsPastWindow: "for \(Int(WeatherForecast.precipitationWindow / 3600))h+"
+        case let .onDay(day): "on " + day.formatted(.dateTime.weekday(.short))
+        }
+    }
+
+    /// Under an hour, minutes to the nearest 5 (at least 5); otherwise hours to the nearest one.
+    static func duration(_ interval: TimeInterval) -> String {
+        let minutes = max(5, Int((interval / 60 / 5).rounded()) * 5)
+        if minutes < 60 {
+            return "\(minutes)m"
+        }
+        return "\(max(1, Int((interval / 3600).rounded())))h"
+    }
+}
+
+/// A forecast day's low and high, in Celsius, and what falls that day.
+struct ForecastDay: Codable, Sendable {
     var date: Date
     var low: Double
     var high: Double
+    /// When it's likely enough to show; `nil` otherwise.
+    var precipitation: PrecipitationSpan.Kind?
+    /// `nil` on days the sun doesn't rise or set.
+    var sunrise: Date?
+    var sunset: Date?
+}
+
+/// The next sunrise or sunset.
+struct SunEvent: Equatable, Sendable {
+    var isSunrise: Bool
+    var date: Date
+
+    /// The first sunrise or sunset after `date` in `days`; `nil` when none is known.
+    static func next(after date: Date, in days: [ForecastDay]) -> SunEvent? {
+        days
+            .flatMap { day in
+                [
+                    day.sunrise.map { SunEvent(isSunrise: true, date: $0) },
+                    day.sunset.map { SunEvent(isSunrise: false, date: $0) },
+                ].compactMap(\.self)
+            }
+            .filter { $0.date > date }
+            .min { $0.date < $1.date }
+    }
 }
 
 extension WeatherForecast {
     /// How likely rain or snow must be for an hour to count.
     static let precipitationThreshold = 0.3
-    /// How far ahead the clock ring shows rain or snow.
+    /// How far ahead rain or snow is looked for.
     static let precipitationWindow: TimeInterval = 12 * 60 * 60
     /// A change smaller than this (Celsius, about 1 °F) doesn't count as the temperature turning around.
     static let turnTolerance = 0.5
@@ -59,16 +124,27 @@ extension WeatherForecast {
         return TemperatureExtreme(temperature: value, isHigh: rising)
     }
 
-    /// The rain and snow in the `precipitationWindow` after `date`: runs of consecutive hours of the same kind,
-    /// clipped to the window. The hour that `date` falls in counts from `date`. `hours` must be in order.
-    static func precipitation(after date: Date, hours: [ForecastHour]) -> [PrecipitationSpan] {
+    /// The rain and snow in the `precipitationWindow` after `date`: runs of consecutive minutes or hours of the same
+    /// kind, clipped to the window. The minute forecast, where there is one, takes over from the hourly one for the
+    /// time it covers. The minute or hour that `date` falls in counts from `date`. Both lists must be in order.
+    static func precipitation(
+        after date: Date,
+        minutes: [ForecastMinute] = [],
+        hours: [ForecastHour]
+    ) -> [PrecipitationSpan] {
         let windowEnd = date.addingTimeInterval(precipitationWindow)
+        let minutesEnd = minutes.last.map { $0.date.addingTimeInterval(60) } ?? date
+        let minuteSlots = minutes.map {
+            (start: $0.date, end: $0.date.addingTimeInterval(60), kind: $0.precipitation)
+        }
+        let hourSlots = hours.map {
+            (start: max($0.date, minutesEnd), end: $0.date.addingTimeInterval(60 * 60), kind: $0.precipitation)
+        }
         var spans: [PrecipitationSpan] = []
-        for hour in hours {
-            let hourEnd = hour.date.addingTimeInterval(60 * 60)
-            guard let kind = hour.precipitation, hourEnd > date, hour.date < windowEnd else { continue }
-            let start = max(hour.date, date)
-            let end = min(hourEnd, windowEnd)
+        for slot in minuteSlots + hourSlots {
+            let start = max(slot.start, date)
+            let end = min(slot.end, windowEnd)
+            guard let kind = slot.kind, end > start else { continue }
             if let last = spans.last, last.kind == kind, last.end == start {
                 spans[spans.count - 1].end = end
             } else {
@@ -76,5 +152,32 @@ extension WeatherForecast {
             }
         }
         return spans
+    }
+
+    /// How far ahead `outlook` looks for a day with rain or snow: less than a week, so the weekday is unambiguous.
+    static let outlookDays = 6
+
+    /// What to say at `date` about `spans` (from `precipitation(after: date, …)`): the rain or
+    /// snow falling now and how long it lasts, else the next one and how soon it starts. With none in the window,
+    /// the first day after today in `days` with some. `nil` when there is none of either.
+    static func outlook(at date: Date, spans: [PrecipitationSpan], days: [ForecastDay] = []) -> PrecipitationOutlook? {
+        guard let span = spans.first(where: { $0.end > date }) else {
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: date)
+            let later = days.first { day in
+                let offset = calendar.dateComponents([.day], from: today, to: calendar.startOfDay(for: day.date)).day
+                return day.precipitation != nil && (1 ... outlookDays).contains(offset ?? 0)
+            }
+            guard let later, let kind = later.precipitation else { return nil }
+            return PrecipitationOutlook(kind: kind, timing: .onDay(later.date))
+        }
+        if span.start <= date {
+            let lastsPastWindow = span.end >= date.addingTimeInterval(precipitationWindow)
+            return PrecipitationOutlook(
+                kind: span.kind,
+                timing: lastsPastWindow ? .lastsPastWindow : .stopsIn(span.end.timeIntervalSince(date))
+            )
+        }
+        return PrecipitationOutlook(kind: span.kind, timing: .startsIn(span.start.timeIntervalSince(date)))
     }
 }

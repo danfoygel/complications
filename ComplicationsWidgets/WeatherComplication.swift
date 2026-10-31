@@ -1,7 +1,7 @@
 import SwiftUI
 import WidgetKit
 
-/// Current temperature and the next high or low inside a 12-hour clock ring that marks when rain or snow is due.
+/// Current temperature and the next high or low.
 struct WeatherComplication: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: Route.weather.widgetKind, provider: WeatherProvider()) { entry in
@@ -10,7 +10,7 @@ struct WeatherComplication: Widget {
                 .widgetURL(Route.weather.url)
         }
         .configurationDisplayName("Temperature")
-        .description("Current temperature, the next high or low, and rain or snow in the next 12 hours.")
+        .description("Current temperature and the next high or low.")
         .supportedFamilies([.accessoryCircular])
     }
 }
@@ -65,12 +65,12 @@ struct WeatherComplicationView: View {
 
     var body: some View {
         if let weather = entry.weather {
-            PrecipitationClock(weather: weather)
+            TemperatureView(weather: weather)
         } else {
             ZStack {
                 AccessoryWidgetBackground()
                 Image(systemName: entry.hasLocation ? "icloud.slash" : "location.slash")
-                    .font(.title3)
+                    .font(.system(size: 19, weight: .semibold))
             }
         }
     }

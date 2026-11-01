@@ -1,10 +1,37 @@
 import SwiftUI
+import WidgetKit
 
 @main
 struct ComplicationsWatchApp: App {
     init() {
         // Early, so a reading that woke the app in the background is delivered.
         PhoneLink.shared.start()
+        Self.reloadComplicationsIfNewBuild()
+    }
+
+    /// After an install, the face keeps showing what the old build drew until each complication's next scheduled
+    /// reload, up to 30 minutes later. Reloading them all once, on the first launch of a new build, shows the new
+    /// look right away.
+    private static func reloadComplicationsIfNewBuild() {
+        let build = buildIdentity()
+        let key = "lastLaunchedBuild"
+        guard AppGroup.defaults.string(forKey: key) != build else { return }
+        AppGroup.defaults.set(build, forKey: key)
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// Changes with each install: the bundle moves to a new container, and the widget extension's files are new.
+    /// The build number alone doesn't, since it only changes on release.
+    private static func buildIdentity() -> String {
+        let extensionURL = Bundle.main.builtInPlugInsURL?.appendingPathComponent("ComplicationsWidgets.appex")
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: extensionURL ?? Bundle.main.bundleURL,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
+        let newest = files
+            .compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }
+            .max()
+        return "\(Bundle.main.bundlePath) \(newest?.timeIntervalSince1970 ?? 0)"
     }
 
     var body: some Scene {

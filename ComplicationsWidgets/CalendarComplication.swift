@@ -110,8 +110,15 @@ struct CalendarComplicationView: View {
     let entry: CalendarEntry
 
     var body: some View {
+        // The width to fit titles to; see FittedText.
+        GeometryReader { geometry in
+            content(width: geometry.size.width)
+        }
+    }
+
+    private func content(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            events
+            events(width: width)
             if let weather = entry.weather {
                 // At the bottom of the slot, so any spare height falls between the events and the weather.
                 Spacer(minLength: 0)
@@ -121,12 +128,12 @@ struct CalendarComplicationView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    @ViewBuilder private var events: some View {
+    @ViewBuilder private func events(width: CGFloat) -> some View {
         let upNext = entry.upNext
         if upNext.lead != nil || !upNext.rest.isEmpty {
             VStack(alignment: .leading, spacing: 1) {
                 if let lead = upNext.lead {
-                    leadRow(lead)
+                    leadRow(lead, width: width)
                 }
                 // Each title starts right after its own label rather than in a column, so it gets all the width
                 // that row's label leaves.
@@ -137,9 +144,11 @@ struct CalendarComplicationView: View {
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                             .fixedSize()
-                        FittedText(event.title)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(upNext.lead == nil ? .primary : .secondary)
+                        FittedText(
+                            event.title, size: 16, weight: .medium,
+                            width: width - labelWidth(label(event)) - 5
+                        )
+                        .foregroundStyle(upNext.lead == nil ? .primary : .secondary)
                     }
                 }
             }
@@ -158,22 +167,30 @@ struct CalendarComplicationView: View {
         }
     }
 
-    private func leadRow(_ event: CalendarEvent) -> some View {
-        HStack(spacing: 5) {
+    private func leadRow(_ event: CalendarEvent, width: CGFloat) -> some View {
+        let time = event.start <= entry.date ? "until \(clock(event.end))" : clock(event.start)
+        return HStack(spacing: 5) {
             Capsule()
                 .fill(Color(event.color))
                 .frame(width: 4, height: 18)
                 .widgetAccentable()
-            FittedText(event.title)
-                .font(.system(size: 16, weight: .semibold))
-                .widgetAccentable()
+            FittedText(
+                event.title, size: 16, weight: .semibold,
+                width: width - 4 - 5 - 5 - labelWidth(time)
+            )
+            .widgetAccentable()
             Spacer(minLength: 0)
-            Text(event.start <= entry.date ? "until \(clock(event.end))" : clock(event.start))
+            Text(time)
                 .font(.system(size: 13, weight: .semibold))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .layoutPriority(1)
         }
+    }
+
+    /// The width of a time label, in its 13-point semibold with monospaced digits.
+    private func labelWidth(_ text: String) -> CGFloat {
+        FittedText.width(of: text, size: 13, weight: .semibold, monospacedDigits: true)
     }
 
     /// "Now", or when it starts.
@@ -211,20 +228,51 @@ struct CalendarComplicationView: View {
 
 /// One line of text cut off at the last whole character that fits, with no "…": on a complication that space is better
 /// spent on another character or two.
+///
+/// The fit is measured here with Core Text rather than left to SwiftUI layout. The watch face draws a complication's
+/// text itself, and with `ViewThatFits` choosing among the prefixes it still drew titles too long for their row and
+/// cut them off with "…".
 struct FittedText: View {
     let text: String
+    let size: CGFloat
+    let weight: Font.Weight
+    let width: CGFloat
 
-    init(_ text: String) {
+    init(_ text: String, size: CGFloat, weight: Font.Weight, width: CGFloat) {
         self.text = text
+        self.size = size
+        self.weight = weight
+        self.width = width
     }
 
     var body: some View {
-        // ViewThatFits shows the first that fits the width, so the longest prefix; the last, an empty one, always does.
-        ViewThatFits(in: .horizontal) {
-            ForEach(Self.prefixes(of: text), id: \.self) { prefix in
-                Text(prefix).lineLimit(1)
+        Text(Self.longestPrefix(of: text, size: size, weight: weight, fitting: width))
+            .font(.system(size: size, weight: weight))
+            .lineLimit(1)
+    }
+
+    /// How wide the face draws text compared with Core Text's measure of the same font: measured on the Series 8 as
+    /// 0.94–0.946 for the titles, which matches SF Compact Display against SF Compact Text on the Mac.
+    private static let drawnScale: CGFloat = 0.94
+
+    /// A little room to spare, for the spread in `drawnScale`.
+    private static let slack: CGFloat = 1
+
+    /// The longest prefix, without trailing spaces, that fits the width.
+    static func longestPrefix(of text: String, size: CGFloat, weight: Font.Weight, fitting width: CGFloat) -> String {
+        let prefixes = prefixes(of: text)
+        // Prefixes only get narrower, and the last, an empty one, always fits.
+        var low = 0
+        var high = prefixes.count - 1
+        while low < high {
+            let middle = (low + high) / 2
+            if Self.width(of: prefixes[middle], size: size, weight: weight) <= width - slack {
+                high = middle
+            } else {
+                low = middle + 1
             }
         }
+        return prefixes[low]
     }
 
     /// Every prefix, longest first, without trailing spaces and so without repeats.
@@ -237,6 +285,25 @@ struct FittedText: View {
             }
         }
         return prefixes
+    }
+
+    /// The width the face draws one line of text at in the system font, optionally with monospaced digits as the labels
+    /// use.
+    static func width(of text: String, size: CGFloat, weight: Font.Weight, monospacedDigits: Bool = false) -> CGFloat {
+        let font = monospacedDigits
+            ? UIFont.monospacedDigitSystemFont(ofSize: size, weight: uiWeight(weight))
+            : UIFont.systemFont(ofSize: size, weight: uiWeight(weight))
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+        return CTLineGetTypographicBounds(line, nil, nil, nil) * drawnScale
+    }
+
+    private static func uiWeight(_ weight: Font.Weight) -> UIFont.Weight {
+        switch weight {
+        case .semibold: .semibold
+        case .medium: .medium
+        case .bold: .bold
+        default: .regular
+        }
     }
 }
 

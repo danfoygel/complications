@@ -7,7 +7,7 @@ struct SendBatteryToWatch: AppIntent {
     }
 
     static var description: IntentDescription {
-        IntentDescription("Sends this iPhone's battery level to the battery complication on your Apple Watch.")
+        IntentDescription("Sends this iPhone's battery level, and its location for the weather, to your Apple Watch.")
     }
 
     func perform() async throws -> some IntentResult {

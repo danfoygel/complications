@@ -4,6 +4,7 @@ import SwiftUI
 struct PhoneView: View {
     @State private var reading: PhoneBatteryReading?
     @State private var lastSent: PhoneBatteryReading?
+    @State private var lastLocation: PhoneLocation?
     @State private var status: WatchLink.Status?
     @State private var outcome: String?
 
@@ -15,6 +16,13 @@ struct PhoneView: View {
                     LabeledContent("Last sent to watch") {
                         if let lastSent {
                             Text(lastSent.date, format: .relative(presentation: .named))
+                        } else {
+                            Text("Never")
+                        }
+                    }
+                    LabeledContent("Location for weather") {
+                        if let lastLocation {
+                            Text(lastLocation.date, format: .relative(presentation: .named))
                         } else {
                             Text("Never")
                         }
@@ -48,7 +56,10 @@ struct PhoneView: View {
             .navigationTitle("Complications")
             .refreshable { await refresh() }
         }
-        .task { await send() }
+        .task {
+            await LocationPermission().request()
+            await send()
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
             Task { await send() }
         }
@@ -71,6 +82,7 @@ struct PhoneView: View {
     private func refresh() async {
         reading = PhoneBatteryReading.current()
         lastSent = Sent.last
+        lastLocation = Sent.lastLocation
         status = await WatchLink.shared.status()
     }
 

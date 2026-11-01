@@ -186,6 +186,36 @@ struct WeatherOutlookTests {
         #expect(WeatherForecast.outlook(at: start, spans: [], days: [day(7, .rain)]) == nil)
     }
 
+    // MARK: 24-hour total
+
+    @Test func totalCountsWhatsLeftOfTheCurrentHour() throws {
+        // 2 mm an hour for a day from `start`, asked half an hour in: half of the first hour and of the hour after
+        // the last full one, which isn't there, so the forecast must run an hour longer.
+        let hours = (0 ..< 25).map {
+            ForecastHour(date: time(Double($0)), temperature: 10, precipitationAmount: 2, snowfallAmount: 20)
+        }
+        let rain = try #require(WeatherForecast.total(of: .rain, after: time(0.5), hours: hours))
+        #expect(abs(rain.amount - 48) < 0.001)
+        let snow = try #require(WeatherForecast.total(of: .snow, after: time(0.5), hours: hours))
+        #expect(abs(snow.amount - 480) < 0.001)
+    }
+
+    @Test func totalNeedsTheWholeDay() {
+        let hours = (0 ..< 24).map { ForecastHour(date: time(Double($0)), temperature: 10, precipitationAmount: 2) }
+        #expect(WeatherForecast.total(of: .rain, after: time(0.5), hours: hours) == nil)
+    }
+
+    @Test func totalsInMillimetresAndInches() {
+        let metric = Locale(identifier: "en_GB")
+        let american = Locale(identifier: "en_US")
+        #expect(PrecipitationTotal(kind: .rain, amount: 12.3).text(locale: metric) == "12mm")
+        #expect(PrecipitationTotal(kind: .rain, amount: 10).text(locale: american) == "0.4″")
+        #expect(PrecipitationTotal(kind: .rain, amount: 0.5).text(locale: american) == "<0.1″")
+        #expect(PrecipitationTotal(kind: .rain, amount: 0).text(locale: american) == "0.0″")
+        #expect(PrecipitationTotal(kind: .snow, amount: 76).text(locale: american) == "3.0″")
+        #expect(PrecipitationTotal(kind: .snow, amount: 300).text(locale: american) == "12″")
+    }
+
     @Test func durationsRoundToFiveMinutesThenHours() {
         #expect(PrecipitationOutlook.duration(60) == "5m")
         #expect(PrecipitationOutlook.duration(28 * 60) == "30m")

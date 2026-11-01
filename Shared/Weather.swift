@@ -59,17 +59,19 @@ enum WeatherForecast {
     /// How far ahead hourly entries go. A reload normally comes well before the last one.
     static let horizon: TimeInterval = 6 * 60 * 60
 
-    /// Current conditions, then one entry per forecast hour up to `horizon`, each with its day's high and low, the
-    /// next high or low, and the rain or snow in the 12 hours after it.
-    static func entries(for location: CLLocation, now: Date = .now) async throws -> [WeatherEntry] {
-        let (current, hourly, daily) = try await WeatherService.shared.weather(
-            for: location,
-            including: .current, .hourly, .daily
+    /// The entries from `snapshot` still in effect at `now`. They're built as of when it was fetched, so an older one
+    /// shows its forecast for the hour rather than conditions from back then as if they were current.
+    static func entries(from snapshot: WeatherSnapshot, now: Date = .now) -> [WeatherEntry] {
+        let entries = entries(
+            current: snapshot.current, hourly: snapshot.hourly, daily: snapshot.daily, now: snapshot.date
         )
-        return entries(current: current, hourly: hourly, daily: daily, now: now)
+        // Keep the entry in effect at `now` as well as the ones after it.
+        let start = entries.lastIndex { $0.date <= now } ?? entries.startIndex
+        return Array(entries[start...])
     }
 
-    /// The entries for a forecast already fetched, as `WeatherScreen` has.
+    /// Current conditions, then one entry per forecast hour up to `horizon`, each with its day's high and low, the
+    /// next high or low, and the rain or snow in the 12 hours after it.
     static func entries(
         current: CurrentWeather,
         hourly: Forecast<HourWeather>,
@@ -114,53 +116,96 @@ enum WeatherForecast {
         }
         return [first] + later
     }
-
-    /// Entries saved by the last successful fetch, for when the next one fails.
-    static func cached(after date: Date, in defaults: UserDefaults = AppGroup.defaults) -> [WeatherEntry] {
-        let entries = defaults.data(forKey: cacheKey)
-            .flatMap { try? JSONDecoder().decode([WeatherEntry].self, from: $0) } ?? []
-        // Keep the entry in effect at `date` as well as the ones after it.
-        let start = entries.lastIndex { $0.date <= date } ?? entries.startIndex
-        return Array(entries[start...])
-    }
-
-    static func save(_ entries: [WeatherEntry], in defaults: UserDefaults = AppGroup.defaults) {
-        defaults.set(try? JSONEncoder().encode(entries), forKey: cacheKey)
-    }
-
-    private static let cacheKey = "weatherEntries"
 }
 
-/// The minute, hourly and daily forecasts behind the calendar's weather line (`WeatherLine`), kept so a failed fetch
-/// can fall back on the last good one.
-struct PrecipitationForecast: Codable, Sendable {
-    var minutes: [ForecastMinute]
-    var hours: [ForecastHour]
-    /// For the next day with rain or snow when there's none in the next 12 hours, and the sunrises and sunsets.
-    var days: [ForecastDay]
+/// One WeatherKit fetch, shared by both weather complications and the Weather screen so the watch fetches once for
+/// all of them rather than once each. Saved in the app group, and used as the fallback when a fetch fails.
+struct WeatherSnapshot: Codable, Sendable {
+    /// When it was fetched.
+    var date: Date
+    var location: PhoneLocation
+    var current: CurrentWeather
+    /// Only where WeatherKit has a minute forecast (the US, the UK, and a few other countries).
+    var minute: Forecast<MinuteWeather>?
+    var hourly: Forecast<HourWeather>
+    var daily: Forecast<DayWeather>
 
-    /// The minute forecast is only there where WeatherKit has one (the US, the UK, and a few other countries).
-    static func fetch(for location: CLLocation) async throws -> PrecipitationForecast {
-        let (minute, hourly, daily) = try await WeatherService.shared.weather(
-            for: location,
-            including: .minute, .hourly, .daily
+    /// A saved snapshot this recent is used rather than fetching again. Up Next reloads every 30 minutes and the
+    /// weather complication every hour, so this makes about one fetch an hour between them.
+    static let maxAge: TimeInterval = 50 * 60
+
+    /// Whether this can stand in for a new fetch at `now` and `location`: recent, and from about the same place.
+    func isFresh(at now: Date, for location: PhoneLocation) -> Bool {
+        now.timeIntervalSince(date) < Self.maxAge && !location.isFar(from: self.location)
+    }
+
+    /// The saved snapshot when it's fresh, else a new one, saved for the others. Throws when the fetch fails.
+    static func latest(for location: PhoneLocation, now: Date = .now) async throws -> WeatherSnapshot {
+        if let saved = cached(), saved.isFresh(at: now, for: location) {
+            return saved
+        }
+        let snapshot = try await SharedFetch.shared.snapshot(for: location)
+        snapshot.save()
+        return snapshot
+    }
+
+    fileprivate static func fetch(for location: PhoneLocation) async throws -> WeatherSnapshot {
+        let (current, minute, hourly, daily) = try await WeatherService.shared.weather(
+            for: location.location,
+            including: .current, .minute, .hourly, .daily
         )
-        return PrecipitationForecast(
-            minutes: minute.map { $0.map(ForecastMinute.init) } ?? [],
-            hours: hourly.map(ForecastHour.init),
-            days: daily.map(ForecastDay.init)
+        return WeatherSnapshot(
+            date: .now, location: location, current: current, minute: minute, hourly: hourly, daily: daily
         )
     }
 
-    static func cached(in defaults: UserDefaults = AppGroup.defaults) -> PrecipitationForecast? {
-        defaults.data(forKey: cacheKey).flatMap { try? JSONDecoder().decode(PrecipitationForecast.self, from: $0) }
+    static func cached(in defaults: UserDefaults = AppGroup.defaults) -> WeatherSnapshot? {
+        defaults.data(forKey: cacheKey).flatMap { try? JSONDecoder().decode(WeatherSnapshot.self, from: $0) }
     }
 
     func save(in defaults: UserDefaults = AppGroup.defaults) {
         defaults.set(try? JSONEncoder().encode(self), forKey: Self.cacheKey)
     }
 
-    private static let cacheKey = "precipitationForecast"
+    private static let cacheKey = "weatherSnapshot"
+}
+
+/// Both complications often reload at once (when the face changes, say); this has the second wait for the first's
+/// fetch instead of making its own. They run in the same extension process.
+private actor SharedFetch {
+    static let shared = SharedFetch()
+
+    private var running: Task<WeatherSnapshot, Error>?
+
+    func snapshot(for location: PhoneLocation) async throws -> WeatherSnapshot {
+        if let running {
+            return try await running.value
+        }
+        let task = Task { try await WeatherSnapshot.fetch(for: location) }
+        running = task
+        defer { running = nil }
+        return try await task.value
+    }
+}
+
+/// The minute, hourly and daily forecasts and the air quality behind the calendar's weather line (`WeatherLine`).
+struct PrecipitationForecast: Sendable {
+    var minutes: [ForecastMinute]
+    var hours: [ForecastHour]
+    /// For the next day with rain or snow when there's none in the next 24 hours, and the sunrises and sunsets.
+    var days: [ForecastDay]
+    /// For the air quality shown when it's dry.
+    var airQuality: [AirQualityReading] = []
+}
+
+extension PrecipitationForecast {
+    init(_ snapshot: WeatherSnapshot) {
+        self.init(
+            minutes: snapshot.minute.map { $0.map(ForecastMinute.init) } ?? [],
+            hours: snapshot.hourly.map(ForecastHour.init),
+            days: snapshot.daily.map(ForecastDay.init)
+        )
+    }
 }
 
 extension PrecipitationSpan.Kind {
@@ -180,7 +225,9 @@ extension ForecastHour {
         self.init(
             date: hour.date,
             temperature: hour.temperature.converted(to: .celsius).value,
-            precipitation: PrecipitationSpan.Kind(hour.precipitation, chance: hour.precipitationChance)
+            precipitation: PrecipitationSpan.Kind(hour.precipitation, chance: hour.precipitationChance),
+            precipitationAmount: hour.precipitationAmount.converted(to: .millimeters).value,
+            snowfallAmount: hour.snowfallAmount.converted(to: .millimeters).value
         )
     }
 }
@@ -207,46 +254,21 @@ extension ForecastDay {
     }
 }
 
-enum Location {
-    static var isAuthorized: Bool {
-        switch CLLocationManager().authorizationStatus {
-        case .authorizedAlways, .authorizedWhenInUse: true
-        default: false
-        }
+/// Where the phone last was, which `PhoneLink` saves as it arrives. The watch never takes a fix of its own: its GPS
+/// costs more battery than a weather forecast is worth. `saved()` is `nil` until the phone has sent a location.
+extension PhoneLocation {
+    private static let key = "phoneLocation"
+
+    static func saved(in defaults: UserDefaults = AppGroup.defaults) -> PhoneLocation? {
+        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Self.self, from: $0) }
     }
 
-    /// A fresh fix if one arrives within `timeout`, else the last known location (the system's, then ours).
-    static func current(timeout: Duration = .seconds(10)) async -> CLLocation? {
-        let fresh = await withTaskGroup(of: CLLocation?.self) { group in
-            group.addTask {
-                do {
-                    for try await update in CLLocationUpdate.liveUpdates() {
-                        if let location = update.location {
-                            return location
-                        }
-                        if update.authorizationDenied || update.authorizationRestricted {
-                            return nil
-                        }
-                    }
-                } catch {}
-                return nil
-            }
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+    /// Saves this location unless a newer one is already saved; returns whether it did.
+    @discardableResult func save(in defaults: UserDefaults = AppGroup.defaults) -> Bool {
+        if let saved = Self.saved(in: defaults), saved.date >= date {
+            return false
         }
-        let defaults = AppGroup.defaults
-        if let location = fresh ?? CLLocationManager().location {
-            defaults.set([location.coordinate.latitude, location.coordinate.longitude], forKey: lastKey)
-            return location
-        }
-        guard let saved = defaults.array(forKey: lastKey) as? [Double], saved.count == 2 else { return nil }
-        return CLLocation(latitude: saved[0], longitude: saved[1])
+        defaults.set(try? JSONEncoder().encode(self), forKey: Self.key)
+        return true
     }
-
-    private static let lastKey = "lastLocation"
 }

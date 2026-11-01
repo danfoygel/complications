@@ -1,7 +1,7 @@
 import CoreLocation
 
-/// Shows the When In Use prompt if the user hasn't answered it yet, and waits for the answer. Only the app can
-/// prompt; the weather widget uses whatever was granted here.
+/// Shows the When In Use prompt if the user hasn't answered it yet, and waits for the answer. The watch's weather
+/// uses the location the phone sends with each battery reading, so the phone is the only one that asks.
 @MainActor
 final class LocationPermission: NSObject, @preconcurrency CLLocationManagerDelegate {
     private let manager = CLLocationManager()

@@ -71,8 +71,28 @@ struct CalendarEventsTests {
         // A week-long trip that's on now, and one exactly 12 hours long, which still counts.
         let trip = event("trip", minutes: -60, length: 7 * 24 * 60)
         let shift = event("shift", minutes: 30, length: 12 * 60)
-        let upNext = CalendarEvents.upNext(at: now, in: [trip, shift, event("a", minutes: 90)])
+        let upNext = CalendarEvents.upNext(at: now, in: [trip, shift, event("a", minutes: 800)])
         #expect(upNext.lead?.id == "shift")
+        #expect(upNext.rest.map(\.id) == ["a"])
+    }
+
+    @Test func longEventStepsAsideForShorterOverlappingOnes() {
+        // A 3-hour block starting first, with three 30-minute meetings inside it.
+        let events = [
+            event("block", minutes: -5, length: 180),
+            event("a", minutes: 10),
+            event("b", minutes: 50),
+            event("c", minutes: 90),
+        ]
+        let upNext = CalendarEvents.upNext(at: now, in: events)
+        #expect(upNext.lead?.id == "a")
+        #expect(upNext.rest.map(\.id) == ["b", "c"])
+    }
+
+    @Test func longEventShowsWhenNothingShorterOverlaps() {
+        let events = [event("block", minutes: 10, length: 180), event("a", minutes: 200)]
+        let upNext = CalendarEvents.upNext(at: now, in: events)
+        #expect(upNext.lead?.id == "block")
         #expect(upNext.rest.map(\.id) == ["a"])
     }
 }

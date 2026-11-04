@@ -61,8 +61,15 @@ enum CalendarEvents {
     /// Up to `lines` timed events to show at `date`, from `events` sorted by start. All-day events and ones longer
     /// than `longestShown` are never shown.
     static func upNext(at date: Date, in events: [CalendarEvent], lines: Int = 3) -> UpNext {
-        let timed = events.filter {
+        let candidates = events.filter {
             !$0.isAllDay && $0.end.timeIntervalSince($0.start) <= longestShown && $0.end > date
+        }
+        // An event that overlaps a shorter one steps aside for it: a long block (a meeting-heavy day's "Dan CR")
+        // would otherwise crowd out the short meetings that actually happen inside it.
+        let timed = candidates.filter { event in
+            !candidates.contains {
+                $0.id != event.id && $0.start < event.end && event.start < $0.end && $0.duration < event.duration
+            }
         }
         let lead = timed.first.flatMap { $0.start <= date.addingTimeInterval(leadWindow) ? $0 : nil }
         let rest = timed.dropFirst(lead == nil ? 0 : 1)
@@ -85,6 +92,10 @@ extension CalendarEvent {
             location: event.location.flatMap { $0.isEmpty ? nil : $0 },
             color: RGB(red: components[0], green: components[1], blue: components[2])
         )
+    }
+
+    var duration: TimeInterval {
+        end.timeIntervalSince(start)
     }
 
     /// "10:00 – 10:30 AM", or "All day".

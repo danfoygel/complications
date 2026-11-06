@@ -133,43 +133,12 @@ struct WeatherLineView: View {
     }
 }
 
-/// The top half of a sun (with both horizontal rays) over a small ▼ before a sunset; flipped, a ▲ over the bottom
-/// half before a sunrise.
+/// `sunrise.fill` before a sunrise, `sunset.fill` before a sunset.
 struct SunSymbol: View {
     let isSunrise: Bool
 
     var body: some View {
-        Image(systemName: "sun.max.fill")
-            .mask(HalfSunMask())
-            .overlay(SunsetTriangle().fill())
-            .scaleEffect(y: isSunrise ? -1 : 1)
-    }
-}
-
-/// The top half of `sun.max.fill`'s bounds, plus a strip at the middle of each side for the horizontal rays.
-private struct HalfSunMask: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height / 2))
-        // The rays end 0.18 of the width in from each side and the disc starts at 0.26.
-        let strip = CGSize(width: rect.width * 0.22, height: rect.height * 0.12)
-        let stripY = rect.midY - strip.height / 2
-        path.addRect(CGRect(origin: CGPoint(x: rect.minX, y: stripY), size: strip))
-        path.addRect(CGRect(origin: CGPoint(x: rect.maxX - strip.width, y: stripY), size: strip))
-        return path
-    }
-}
-
-/// A ▼ in the bottom half, a little below the cut and narrower than the disc.
-private struct SunsetTriangle: Shape {
-    func path(in rect: CGRect) -> Path {
-        let top = rect.minY + rect.height * 0.61
-        let halfWidth = rect.width * 0.17
-        var path = Path()
-        path.move(to: CGPoint(x: rect.midX - halfWidth, y: top))
-        path.addLine(to: CGPoint(x: rect.midX + halfWidth, y: top))
-        path.addLine(to: CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.83))
-        path.closeSubpath()
-        return path
+        Image(systemName: isSunrise ? "sunrise.fill" : "sunset.fill")
     }
 }
 

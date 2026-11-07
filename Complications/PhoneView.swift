@@ -2,6 +2,8 @@ import SwiftUI
 
 /// The phone's battery, what the watch has been sent, and how to set up the automations that keep it current.
 struct PhoneView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var locator = Locator()
     @State private var reading: PhoneBatteryReading?
     @State private var lastSent: PhoneBatteryReading?
     @State private var lastLocation: PhoneLocation?
@@ -56,8 +58,14 @@ struct PhoneView: View {
             .navigationTitle("Complications")
             .refreshable { await refresh() }
         }
-        .task {
-            await LocationPermission().request()
+        // Each time the app comes to the front.
+        .task(id: scenePhase == .active) {
+            guard scenePhase == .active else { return }
+            // What there is first, so the watch doesn't wait on the prompt or the fix; then again with a fresh
+            // location, which only spends a complication transfer if the phone has moved far.
+            await send()
+            await locator.requestAccess()
+            await locator.refresh()
             await send()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in

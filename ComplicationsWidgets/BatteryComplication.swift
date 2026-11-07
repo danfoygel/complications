@@ -15,8 +15,10 @@ struct BatteryComplication: Widget {
     }
 }
 
-/// Re-reads the battery every 15 minutes (the system may stretch that) and fills the gap with a forecast. The phone's
-/// reading comes from whatever the watch app last received; receiving a newer one reloads this.
+/// Re-reads the battery every 30 minutes (the system may stretch that) and fills the gap with a forecast, one entry
+/// per percent. Asking more often would only run through the day's reload budget sooner, leaving the system to space
+/// them out anyway. The phone's reading comes from whatever the watch app last received; receiving a newer one, and
+/// the Battery screen, reload this too.
 struct BatteryProvider: TimelineProvider {
     func placeholder(in _: Context) -> BatteryEntry {
         BatteryEntry(date: .now, level: 0.82, phone: PhoneBatteryReading(date: .now, level: 0.64, isPluggedIn: false))
@@ -41,7 +43,7 @@ struct BatteryProvider: TimelineProvider {
             }
             completion(Timeline(
                 entries: BatteryForecast.adding(.saved(), to: entries),
-                policy: .after(now.addingTimeInterval(15 * 60))
+                policy: .after(now.addingTimeInterval(30 * 60))
             ))
         }
     }

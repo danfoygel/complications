@@ -60,8 +60,10 @@ enum WeatherForecast {
     static let horizon: TimeInterval = 6 * 60 * 60
 
     /// The entries from `snapshot` still in effect at `now`. They're built as of when it was fetched, so an older one
-    /// shows its forecast for the hour rather than conditions from back then as if they were current.
+    /// shows its forecast for the hour rather than conditions from back then as if they were current. None once
+    /// `now` is past the last of them: an hours-old forecast shouldn't stand in for the current temperature.
     static func entries(from snapshot: WeatherSnapshot, now: Date = .now) -> [WeatherEntry] {
+        guard now.timeIntervalSince(snapshot.date) < horizon else { return [] }
         let entries = entries(
             current: snapshot.current, hourly: snapshot.hourly, daily: snapshot.daily, now: snapshot.date
         )
@@ -139,7 +141,8 @@ struct WeatherSnapshot: Codable, Sendable {
         now.timeIntervalSince(date) < Self.maxAge && !location.isFar(from: self.location)
     }
 
-    /// The saved snapshot when it's fresh, else a new one, saved for the others. Throws when the fetch fails.
+    /// The saved snapshot when it's fresh, else a new one, saved for the others. Throws when the fetch fails or
+    /// takes longer than `fetchLimit`.
     static func latest(for location: PhoneLocation, now: Date = .now) async throws -> WeatherSnapshot {
         if let saved = cached(), saved.isFresh(at: now, for: location) {
             return saved
@@ -149,13 +152,38 @@ struct WeatherSnapshot: Codable, Sendable {
         return snapshot
     }
 
+    /// The saved snapshot as a stand-in when a fetch fails: only one from about the same place as `location` and
+    /// under `maxAge` old, so a forecast from before a trip, or from days ago, isn't shown as this one.
+    static func fallback(
+        for location: PhoneLocation?,
+        maxAge: TimeInterval,
+        now: Date = .now,
+        in defaults: UserDefaults = AppGroup.defaults
+    ) -> WeatherSnapshot? {
+        guard let location, let saved = cached(in: defaults),
+              now.timeIntervalSince(saved.date) < maxAge, !location.isFar(from: saved.location) else { return nil }
+        return saved
+    }
+
+    /// How long a fetch may take before it counts as failed, well within a widget's time to return its timeline.
+    static let fetchLimit: Duration = .seconds(15)
+
+    /// How far the hourly forecast goes. Up Next looks 24 hours ahead from each of its entries, and WeatherKit's
+    /// default (25 hours from the current hour) stops covering that within the hour; two days keeps rain on the line
+    /// for a day of entries even when reloads are skipped.
+    static let hourlyRange: TimeInterval = 48 * 60 * 60
+
     fileprivate static func fetch(for location: PhoneLocation) async throws -> WeatherSnapshot {
+        let now = Date.now
+        // From the start of the current hour, which the default query also includes.
+        let hourStart = Calendar.current.dateInterval(of: .hour, for: now)?.start ?? now
         let (current, minute, hourly, daily) = try await WeatherService.shared.weather(
             for: location.location,
-            including: .current, .minute, .hourly, .daily
+            including: .current, .minute,
+            .hourly(startDate: hourStart, endDate: hourStart.addingTimeInterval(hourlyRange)), .daily
         )
         return WeatherSnapshot(
-            date: .now, location: location, current: current, minute: minute, hourly: hourly, daily: daily
+            date: now, location: location, current: current, minute: minute, hourly: hourly, daily: daily
         )
     }
 
@@ -171,19 +199,27 @@ struct WeatherSnapshot: Codable, Sendable {
 }
 
 /// Both complications often reload at once (when the face changes, say); this has the second wait for the first's
-/// fetch instead of making its own. They run in the same extension process.
+/// fetch instead of making its own, when it's for about the same place. They run in the same extension process.
 private actor SharedFetch {
     static let shared = SharedFetch()
 
-    private var running: Task<WeatherSnapshot, Error>?
+    private var running: (location: PhoneLocation, task: Task<WeatherSnapshot, Error>)?
 
     func snapshot(for location: PhoneLocation) async throws -> WeatherSnapshot {
-        if let running {
-            return try await running.value
+        if let running, !location.isFar(from: running.location) {
+            return try await running.task.value
         }
-        let task = Task { try await WeatherSnapshot.fetch(for: location) }
-        running = task
-        defer { running = nil }
+        let task = Task {
+            try await Deadline.run(within: WeatherSnapshot.fetchLimit) {
+                try await WeatherSnapshot.fetch(for: location)
+            }
+        }
+        running = (location, task)
+        defer {
+            if running?.task == task {
+                running = nil
+            }
+        }
         return try await task.value
     }
 }

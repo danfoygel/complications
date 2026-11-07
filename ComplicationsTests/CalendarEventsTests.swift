@@ -122,4 +122,11 @@ struct CalendarEventsTests {
         #expect(upNext.lead?.id == "block")
         #expect(upNext.rest.map(\.id) == ["a"])
     }
+
+    @Test func onlyTimedEventsUpToTwelveHoursAreShown() {
+        #expect(event("a", minutes: 0).isShown)
+        #expect(event("shift", minutes: 0, length: 12 * 60).isShown)
+        #expect(!event("trip", minutes: 0, length: 12 * 60 + 1).isShown)
+        #expect(!allDay("day").isShown)
+    }
 }

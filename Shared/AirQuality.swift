@@ -45,7 +45,9 @@ enum AirQuality {
             URLQueryItem(name: "forecast_days", value: "2"),
             URLQueryItem(name: "timeformat", value: "unixtime"),
         ]
-        let (data, response) = try await URLSession.shared.data(from: components.url!)
+        // Well within a widget's time to return its timeline, rather than the default minute.
+        let request = URLRequest(url: components.url!, timeoutInterval: 10)
+        let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         return try readings(from: data)
     }

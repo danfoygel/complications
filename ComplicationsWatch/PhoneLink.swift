@@ -10,6 +10,9 @@ final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
     static let shared = PhoneLink()
 
     private let activation = SessionActivation()
+    /// Updates arrive on the session's queue and from `refresh()` at once; one at a time, an older one can't
+    /// overwrite a newer one between checking and saving.
+    private let storing = Mutex(())
 
     func start() {
         activation.start(delegate: self)
@@ -56,13 +59,15 @@ final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
     }
 
     private func store(_ update: PhoneUpdate) {
-        if let reading = update.reading, reading.save() {
-            Route.battery.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
-        }
-        if let location = update.location {
-            let previous = PhoneLocation.saved()
-            if location.save(), location.isFar(from: previous) {
-                Route.weather.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
+        storing.withLock { _ in
+            if let reading = update.reading, reading.save() {
+                Route.battery.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
+            }
+            if let location = update.location {
+                let previous = PhoneLocation.saved()
+                if location.save(), location.isFar(from: previous) {
+                    Route.weather.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
+                }
             }
         }
     }

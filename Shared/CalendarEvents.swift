@@ -59,10 +59,23 @@ enum CalendarEvents {
     /// Events longer than this are effectively all-day ones (a trip, a conference), so they're left out too.
     static let longestShown: TimeInterval = 12 * 60 * 60
 
+    /// Events longer than this are blocks (a meeting-heavy day's "Dan CR") that step aside for the meetings inside
+    /// them; shorter ones are real meetings and always show, even when double-booked.
+    static let blockLength: TimeInterval = 2 * 60 * 60
+
     /// Up to `lines` timed events to show at `date`, from `events` sorted by start. All-day events and ones longer
-    /// than `longestShown` are never shown.
+    /// than `longestShown` are never shown, and a block steps aside while a shorter event inside it is on or starts
+    /// within `leadWindow`.
     static func upNext(at date: Date, in events: [CalendarEvent], lines: Int = 3) -> UpNext {
-        let timed = events.filter { $0.isShown && $0.end > date }
+        let candidates = events.filter { $0.isShown && $0.end > date }
+        // Otherwise a block crowds out the short meetings that actually happen inside it. Until the next one comes
+        // up, the block is what's on, so it still shows.
+        let timed = candidates.filter { event in
+            event.duration <= blockLength || !candidates.contains {
+                $0.duration < event.duration && event.start <= $0.start && $0.end <= event.end
+                    && $0.start <= date.addingTimeInterval(leadWindow)
+            }
+        }
         let lead = timed.first.flatMap { $0.start <= date.addingTimeInterval(leadWindow) ? $0 : nil }
         let rest = timed.dropFirst(lead == nil ? 0 : 1)
         return UpNext(lead: lead, rest: Array(rest.prefix(lead == nil ? lines : lines - 1)))
@@ -89,6 +102,10 @@ extension CalendarEvent {
             location: event.location.flatMap { $0.isEmpty ? nil : $0 },
             color: RGB(red: components[0], green: components[1], blue: components[2])
         )
+    }
+
+    var duration: TimeInterval {
+        end.timeIntervalSince(start)
     }
 
     /// "10:00 – 10:30 AM", or "All day".

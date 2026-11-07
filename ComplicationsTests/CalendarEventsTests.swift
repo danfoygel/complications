@@ -71,8 +71,55 @@ struct CalendarEventsTests {
         // A week-long trip that's on now, and one exactly 12 hours long, which still counts.
         let trip = event("trip", minutes: -60, length: 7 * 24 * 60)
         let shift = event("shift", minutes: 30, length: 12 * 60)
-        let upNext = CalendarEvents.upNext(at: now, in: [trip, shift, event("a", minutes: 90)])
+        let upNext = CalendarEvents.upNext(at: now, in: [trip, shift, event("a", minutes: 800)])
         #expect(upNext.lead?.id == "shift")
+        #expect(upNext.rest.map(\.id) == ["a"])
+    }
+
+    @Test func longEventStepsAsideForShorterOverlappingOnes() {
+        // A 3-hour block starting first, with three 30-minute meetings inside it.
+        let events = [
+            event("block", minutes: -5, length: 180),
+            event("a", minutes: 10),
+            event("b", minutes: 50),
+            event("c", minutes: 90),
+        ]
+        let upNext = CalendarEvents.upNext(at: now, in: events)
+        #expect(upNext.lead?.id == "a")
+        #expect(upNext.rest.map(\.id) == ["b", "c"])
+    }
+
+    @Test func blockShowsUntilTheMeetingInsideItComesUp() {
+        // A 3-hour block on now, with its only meeting two hours away.
+        let events = [event("block", minutes: -5, length: 180), event("a", minutes: 120)]
+        let upNext = CalendarEvents.upNext(at: now, in: events)
+        #expect(upNext.lead?.id == "block")
+        #expect(upNext.rest.map(\.id) == ["a"])
+        let later = CalendarEvents.upNext(at: now.addingTimeInterval(61 * 60), in: events)
+        #expect(later.lead?.id == "a")
+        #expect(later.rest.isEmpty)
+    }
+
+    @Test func blockShowsBesideAMeetingItOnlyOverlaps() {
+        // The meeting starts inside the block but runs past its end.
+        let events = [event("block", minutes: -5, length: 180), event("a", minutes: 160, length: 60)]
+        let upNext = CalendarEvents.upNext(at: now.addingTimeInterval(120 * 60), in: events)
+        #expect(upNext.lead?.id == "block")
+        #expect(upNext.rest.map(\.id) == ["a"])
+    }
+
+    @Test func doubleBookedMeetingsBothShow() {
+        // An hour-long meeting with a 15-minute one inside it; neither is a block.
+        let events = [event("hour", minutes: -5, length: 60), event("quick", minutes: 40, length: 15)]
+        let upNext = CalendarEvents.upNext(at: now, in: events)
+        #expect(upNext.lead?.id == "hour")
+        #expect(upNext.rest.map(\.id) == ["quick"])
+    }
+
+    @Test func longEventShowsWhenNothingShorterOverlaps() {
+        let events = [event("block", minutes: 10, length: 180), event("a", minutes: 200)]
+        let upNext = CalendarEvents.upNext(at: now, in: events)
+        #expect(upNext.lead?.id == "block")
         #expect(upNext.rest.map(\.id) == ["a"])
     }
 

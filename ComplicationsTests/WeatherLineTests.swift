@@ -98,27 +98,41 @@ struct WeatherLineTests {
     }
 
     @Test func dryDaysChangeOnlyAtSunriseAndSunset() {
+        // The rest of today's sunset and four more days of both.
         let changes = WeatherLine.changes(after: start, forecast: forecast(hours: 30))
-        #expect(changes.count == 10)
+        #expect(changes.count == 9)
     }
 
     @Test func rainAheadChangesOnlyWhenItsWordingDoes() {
-        let rainy = forecast(hours: 30, rainFrom: 3)
-        let marks = WeatherLine.changes(after: start, forecast: rainy).dropLast(10)
+        let rainy = forecast(hours: 30, rainFrom: 3, aqi: 40)
+        let changes = WeatherLine.changes(after: start, forecast: rainy)
         // "in 3h" until it rounds to "in 2h", "in 1h", then 5-minute steps under the hour, then "for 1h" as the total
-        // falls, and dry: far fewer than the 288 five-minute marks in 24 hours, and each reads differently from the
-        // one before.
-        #expect(marks.count > 5 && marks.count < 40)
-        func reading(at date: Date) -> String {
-            let line = WeatherLine(at: date, forecast: rainy)
-            return "\(line?.total?.text ?? "") \(line?.outlook?.text ?? "")"
+        // falls, then dry with the sun and the air quality: far fewer than the 288 five-minute marks and 30 hours of
+        // air quality, and each reads differently from the one before.
+        #expect(changes.count > 5 && changes.count < 50)
+        var previous = WeatherLine(at: start, forecast: rainy)?.appearance
+        for change in changes {
+            let appearance = WeatherLine(at: change, forecast: rainy)?.appearance
+            #expect(appearance != previous)
+            previous = appearance
         }
-        var previous = reading(at: start)
-        for mark in marks {
-            let text = reading(at: mark)
-            #expect(text != previous)
-            previous = text
+    }
+
+    @Test func airQualityWhileItRainsAddsNoEntries() {
+        let raining = { (aqi: Int?) in
+            WeatherLine.changes(after: start, forecast: forecast(hours: 30, rainFrom: 3, aqi: aqi))
+                .filter { $0 < time(4) }
         }
+        #expect(raining(40) == raining(nil))
+    }
+
+    @Test func likelyRainWithNoAmountShowsTheSunInstead() {
+        var dryish = forecast(hours: 25, rainFrom: 3)
+        dryish.hours[3].precipitationAmount = 0
+        let line = WeatherLine(at: start, forecast: dryish)
+        #expect(line?.total == nil)
+        #expect(line?.sun != nil)
+        #expect(line?.outlook?.text == "in 3h")
     }
 
     @Test func nothingToShowIsNil() {
@@ -134,8 +148,8 @@ struct WeatherLineTests {
         #expect(WeatherLine(at: time(2), forecast: forecast(hours: 25, rainFrom: 20))?.outlook == nil)
     }
 
-    @Test func clockTimesKeepTheirOwnSymbols() {
-        let date = Calendar.current.date(bySettingHour: 21, minute: 5, second: 0, of: start)!
+    @Test func clockTimesKeepTheirOwnSymbols() throws {
+        let date = try #require(Calendar.current.date(bySettingHour: 21, minute: 5, second: 0, of: start))
         #expect(ClockTime.string(date, format: "h:mma", amSymbol: "am", pmSymbol: "pm") == "9:05pm")
         #expect(ClockTime.string(date, format: "h:mma", amSymbol: "a", pmSymbol: "p") == "9:05p")
         #expect(ClockTime.string(date, format: "HH:mm") == "21:05")

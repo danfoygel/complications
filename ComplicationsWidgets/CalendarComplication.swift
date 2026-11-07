@@ -35,8 +35,8 @@ struct CalendarEntry: TimelineEntry {
 
 /// An entry at every start and end in the next week, an hour before each start, and at each midnight, so the
 /// complication moves on as events come within the lead window, begin, and finish, and as days change. For the
-/// weather line, also one at each sunrise and sunset, each hour of air quality, and wherever the rain or snow reads
-/// differently in the next 12 hours (`WeatherLine.changes`).
+/// weather line, also wherever it reads differently: at a sunrise or sunset, an hour of air quality, or a change in
+/// the rain or snow in the next 24 hours (`WeatherLine.changes`).
 struct CalendarProvider: TimelineProvider {
     /// How far ahead the timeline goes. A reload normally comes every 30 minutes, but the system rations them and can
     /// go a day or more without one; past its last entry the complication would stay on that entry, showing events
@@ -98,15 +98,23 @@ struct CalendarProvider: TimelineProvider {
     /// last one saved for about the same place within `fallbackAge`, with the air quality (also fetched only when
     /// it's old). Both fetches have time limits, so the events aren't held up for long by a poor connection.
     private static func forecast() async -> PrecipitationForecast? {
-        guard let location = PhoneLocation.saved() else { return nil }
-        async let latestAirQuality = AirQuality.latest(for: location)
-        let snapshot = await (try? WeatherSnapshot.latest(for: location))
-            ?? WeatherSnapshot.fallback(for: location, maxAge: fallbackAge)
-        let airQuality = await latestAirQuality
-        return snapshot.map {
-            var forecast = PrecipitationForecast($0)
-            forecast.airQuality = airQuality
-            return forecast
+        guard let location = PhoneLocation.saved(),
+              let snapshot = await (try? WeatherSnapshot.latest(for: location))
+              ?? WeatherSnapshot.fallback(for: location, maxAge: fallbackAge) else { return nil }
+        var forecast = PrecipitationForecast(snapshot)
+        // After the weather rather than alongside it, so there's no fetch for air quality the line won't show: none
+        // without a forecast, and none when rain or snow is on every hour of the next day.
+        if needsAirQuality(forecast) {
+            forecast.airQuality = await AirQuality.latest(for: location)
+        }
+        return forecast
+    }
+
+    /// Whether the line shows the air quality at some hour of the next day (it does when there's no rain or snow to
+    /// tell of).
+    private static func needsAirQuality(_ forecast: PrecipitationForecast, now: Date = .now) -> Bool {
+        (0 ..< 24).contains { hour in
+            WeatherLine(at: now.addingTimeInterval(Double(hour) * 60 * 60), forecast: forecast)?.outlook == nil
         }
     }
 }
@@ -193,9 +201,11 @@ struct CalendarComplicationView: View {
         }
     }
 
-    /// The width of a time label, in its 13-point semibold with monospaced digits.
+    /// The width of a time label, in its 13-point semibold with monospaced digits. Taken at Core Text's full measure:
+    /// `FittedText.drawnScale` was measured on the titles, and the label, which never shrinks, taking more room than
+    /// estimated would leave the title too little and get it cut off with "…". Too much costs a character at most.
     private func labelWidth(_ text: String) -> CGFloat {
-        FittedText.width(of: text, size: 13, weight: .semibold, monospacedDigits: true)
+        FittedText.width(of: text, size: 13, weight: .semibold, monospacedDigits: true, drawnScale: 1)
     }
 
     /// "Now", or when it starts.
@@ -256,7 +266,7 @@ struct FittedText: View {
 
     /// How wide the face draws text compared with Core Text's measure of the same font: measured on the Series 8 as
     /// 0.94–0.946 for the titles, which matches SF Compact Display against SF Compact Text on the Mac.
-    private static let drawnScale: CGFloat = 0.94
+    static let drawnScale: CGFloat = 0.94
 
     /// A little room to spare, for the spread in `drawnScale`.
     private static let slack: CGFloat = 1
@@ -292,7 +302,10 @@ struct FittedText: View {
 
     /// The width the face draws one line of text at in the system font, optionally with monospaced digits as the labels
     /// use.
-    static func width(of text: String, size: CGFloat, weight: Font.Weight, monospacedDigits: Bool = false) -> CGFloat {
+    static func width(
+        of text: String, size: CGFloat, weight: Font.Weight, monospacedDigits: Bool = false,
+        drawnScale: CGFloat = drawnScale
+    ) -> CGFloat {
         let font = monospacedDigits
             ? UIFont.monospacedDigitSystemFont(ofSize: size, weight: uiWeight(weight))
             : UIFont.systemFont(ofSize: size, weight: uiWeight(weight))

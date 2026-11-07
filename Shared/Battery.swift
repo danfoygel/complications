@@ -88,17 +88,29 @@ enum BatteryForecast {
         return result.sorted { $0.date < $1.date }
     }
 
+    /// How old the last reading may be and still give a rate when there's none inside the `window`.
+    static let longestGap: TimeInterval = 3 * 60 * 60
+
     /// Adds `reading` to the saved history and returns it, oldest first. A charger change starts a new history.
+    /// The app and the widget both record, so this holds the app group's lock.
     static func record(_ reading: BatteryReading, in defaults: UserDefaults = AppGroup.defaults) -> [BatteryReading] {
-        let key = "batteryHistory"
-        var history = defaults.data(forKey: key)
-            .flatMap { try? JSONDecoder().decode([BatteryReading].self, from: $0) } ?? []
-        if history.last?.isPluggedIn != reading.isPluggedIn {
-            history = []
+        AppGroup.withLock {
+            let key = "batteryHistory"
+            var history = defaults.data(forKey: key)
+                .flatMap { try? JSONDecoder().decode([BatteryReading].self, from: $0) } ?? []
+            if history.last?.isPluggedIn != reading.isPluggedIn {
+                history = []
+            }
+            var recent = history.filter { (0 ... window).contains(reading.date.timeIntervalSince($0.date)) }
+            // The system often spaces reloads out past the window; the last one's reading then still gives a rate,
+            // rather than none until two reloads land within an hour.
+            if recent.isEmpty, let last = history.last {
+                recent = (0 ... longestGap).contains(reading.date.timeIntervalSince(last.date)) ? [last] : []
+            }
+            history = recent + [reading]
+            defaults.set(try? JSONEncoder().encode(history), forKey: key)
+            return history
         }
-        history = history.filter { (0 ... window).contains(reading.date.timeIntervalSince($0.date)) } + [reading]
-        defaults.set(try? JSONEncoder().encode(history), forKey: key)
-        return history
     }
 }
 
@@ -130,5 +142,26 @@ extension PhoneBatteryReading {
         }
         defaults.set(try? JSONEncoder().encode(self), forKey: Self.key)
         return true
+    }
+
+    private static let timelineKey = "phoneBatteryInTimeline"
+
+    /// The reading the battery complication's timeline was last built with.
+    static func inTimeline(in defaults: UserDefaults = AppGroup.defaults) -> PhoneBatteryReading? {
+        defaults.data(forKey: timelineKey).flatMap { try? JSONDecoder().decode(Self.self, from: $0) }
+    }
+
+    static func setInTimeline(_ reading: PhoneBatteryReading?, in defaults: UserDefaults = AppGroup.defaults) {
+        defaults.set(reading.flatMap { try? JSONEncoder().encode($0) }, forKey: timelineKey)
+    }
+
+    /// Whether the battery complication needs reloading for this reading, when its timeline was built with `shown`:
+    /// the percent or charger state differs, or the dimming that timeline has for `shown` is due within half an hour,
+    /// which a reload on its usual schedule might not come in time to undo. Reloads asked for in the background count
+    /// against the widget's daily budget, and the phone sends far more readings than change the face.
+    func needsReload(after shown: PhoneBatteryReading?, at now: Date) -> Bool {
+        guard let shown else { return true }
+        return percent != shown.percent || isPluggedIn != shown.isPluggedIn
+            || now.timeIntervalSince(shown.date) > Self.staleAfter - 30 * 60
     }
 }

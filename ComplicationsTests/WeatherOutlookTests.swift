@@ -200,6 +200,13 @@ struct WeatherOutlookTests {
         #expect(abs(snow.amount - 480) < 0.001)
     }
 
+    @Test func sleetWithNoSnowfallTotalsItsWater() throws {
+        let hours = (0 ..< 25).map { ForecastHour(date: time(Double($0)), temperature: 0, precipitationAmount: 1) }
+        let total = try #require(WeatherForecast.total(of: .snow, after: time(0), hours: hours))
+        #expect(total.kind == .rain)
+        #expect(abs(total.amount - 24) < 0.001)
+    }
+
     @Test func totalNeedsTheWholeDay() {
         let hours = (0 ..< 24).map { ForecastHour(date: time(Double($0)), temperature: 10, precipitationAmount: 2) }
         #expect(WeatherForecast.total(of: .rain, after: time(0.5), hours: hours) == nil)

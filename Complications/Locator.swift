@@ -7,8 +7,14 @@ import CoreLocation
 @MainActor
 final class Locator: NSObject, @preconcurrency CLLocationManagerDelegate {
     private let manager = CLLocationManager()
-    private var answered: CheckedContinuation<Void, Never>?
-    private var located: CheckedContinuation<Void, Never>?
+    private var answered: Waiter?
+    private var located: Waiter?
+
+    /// A caller waiting for an answer or a fix. Its own timeout only ends it, not one from a later call.
+    private struct Waiter {
+        let id = UUID()
+        let continuation: CheckedContinuation<Void, Never>
+    }
 
     override init() {
         super.init()
@@ -21,11 +27,14 @@ final class Locator: NSObject, @preconcurrency CLLocationManagerDelegate {
     func requestAccess(limit: Duration = .seconds(60)) async {
         guard manager.authorizationStatus == .notDetermined, answered == nil else { return }
         await withCheckedContinuation { continuation in
-            answered = continuation
+            let waiter = Waiter(continuation: continuation)
+            answered = waiter
             manager.requestWhenInUseAuthorization()
             Task { @MainActor in
                 try? await Task.sleep(for: limit)
-                self.finish(&self.answered)
+                if self.answered?.id == waiter.id {
+                    self.finish(&self.answered)
+                }
             }
         }
     }
@@ -39,17 +48,20 @@ final class Locator: NSObject, @preconcurrency CLLocationManagerDelegate {
         }
         guard located == nil else { return }
         await withCheckedContinuation { continuation in
-            located = continuation
+            let waiter = Waiter(continuation: continuation)
+            located = waiter
             manager.requestLocation()
             Task { @MainActor in
                 try? await Task.sleep(for: limit)
-                self.finish(&self.located)
+                if self.located?.id == waiter.id {
+                    self.finish(&self.located)
+                }
             }
         }
     }
 
-    private func finish(_ waiter: inout CheckedContinuation<Void, Never>?) {
-        waiter?.resume()
+    private func finish(_ waiter: inout Waiter?) {
+        waiter?.continuation.resume()
         waiter = nil
     }
 

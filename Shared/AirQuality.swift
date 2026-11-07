@@ -67,17 +67,25 @@ enum AirQuality {
     static let maxAge: TimeInterval = 50 * 60
 
     /// The saved readings when they're recent and from about the same place, else new ones, saved. When the fetch
-    /// fails, the saved ones from about the same place, however old (they cover two days); else none.
+    /// fails, or recent failures say to wait (`Backoff`), the saved ones from about the same place, however old (they
+    /// cover two days); else none.
     static func latest(for location: PhoneLocation, now: Date = .now) async -> [AirQualityReading] {
         let saved = Saved.load()
         let nearby = saved.flatMap { location.isFar(from: $0.location) ? nil : $0 }
         if let nearby, now.timeIntervalSince(nearby.date) < maxAge {
             return nearby.readings
         }
-        guard let readings = try? await fetch(for: location.location) else { return nearby?.readings ?? [] }
+        guard (try? Backoff.check(backoffKey, at: now, for: location)) != nil else { return nearby?.readings ?? [] }
+        guard let readings = try? await fetch(for: location.location) else {
+            Backoff.recordFailure(backoffKey, at: now, for: location)
+            return nearby?.readings ?? []
+        }
+        Backoff.reset(backoffKey)
         Saved(date: now, location: location, readings: readings).save()
         return readings
     }
+
+    private static let backoffKey = "airQualityBackoff"
 
     /// The last fetch's readings, wherever they were for.
     static func cached(in defaults: UserDefaults = AppGroup.defaults) -> [AirQualityReading] {

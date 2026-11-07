@@ -41,7 +41,9 @@ struct WeatherLine: Equatable, Sendable {
         case .onDay:
             break
         default:
+            // None at all (likely enough to count, but forecast as nothing) would read "0.0″"; the sun says more.
             total = outlook.flatMap { WeatherForecast.total(of: $0.kind, after: date, hours: forecast.hours) }
+                .flatMap { $0.amount > 0 ? $0 : nil }
         }
         if total == nil {
             sun = SunEvent.next(after: date, in: forecast.days)
@@ -51,35 +53,43 @@ struct WeatherLine: Equatable, Sendable {
         }
     }
 
-    /// The times after `now` when the line from `forecast` changes: each sunrise and sunset, each hour of air
-    /// quality, and each 5-minute mark within the `totalWindow` where the rain or snow reads differently
-    /// from the mark before. Every other mark would be an entry that looks just like the last, which the watch still
-    /// has to render.
+    /// What the line reads, to tell two moments apart: the outlook holds exact intervals, which differ at every
+    /// moment, so it's compared by its wording. Cheaper than the text itself, which `changes` would make hundreds of.
+    var appearance: String {
+        [
+            sun.map { "\($0.isSunrise ? "rise" : "set") \($0.date.timeIntervalSinceReferenceDate)" },
+            total.map(\.appearance),
+            outlook.map(\.appearance),
+            airQuality.map { "AQI \($0)" },
+        ].map { $0 ?? "-" }.joined(separator: " ")
+    }
+
+    /// The times after `now` when the line from `forecast` reads differently from just before: of each sunrise and
+    /// sunset, each hour of air quality, and each 5-minute mark within the `totalWindow` (for the rain or snow), only
+    /// those where it changes. The rest would be entries that look just like the one before (the air quality while
+    /// it rains, a sunrise while the rain total stands in its place), which the watch still has to render.
     static func changes(after now: Date, forecast: PrecipitationForecast) -> [Date] {
         let step: TimeInterval = 5 * 60
         let firstMark = (now.timeIntervalSinceReferenceDate / step).rounded(.up) * step
-        // What the line reads; the outlook itself holds exact intervals, which differ at every mark.
-        func reading(at date: Date) -> String? {
-            WeatherLine(at: date, forecast: forecast).map { line in
-                [
-                    line.total.map { "\($0.kind.rawValue) \($0.text)" },
-                    line.outlook.map { "\($0.kind.rawValue) \($0.text)" },
-                    line.airQuality.map { "AQI \($0)" },
-                ].map { $0 ?? "-" }.joined(separator: " ")
-            }
+        let marks = (0 ..< Int(WeatherForecast.totalWindow / step)).map {
+            Date(timeIntervalSinceReferenceDate: firstMark + Double($0) * step)
         }
-        var shown = reading(at: now)
-        var marks: [Date] = []
-        for index in 0 ..< Int(WeatherForecast.totalWindow / step) {
-            let mark = Date(timeIntervalSinceReferenceDate: firstMark + Double(index) * step)
-            let current = reading(at: mark)
+        let candidates = Set(
+            marks + forecast.days.flatMap { [$0.sunrise, $0.sunset].compactMap(\.self) }
+                + forecast.airQuality.map(\.date)
+        )
+        .filter { $0 > now }
+        .sorted()
+        var shown = WeatherLine(at: now, forecast: forecast)?.appearance
+        var changes: [Date] = []
+        for date in candidates {
+            let current = WeatherLine(at: date, forecast: forecast)?.appearance
             if current != shown {
-                marks.append(mark)
+                changes.append(date)
                 shown = current
             }
         }
-        return marks + forecast.days.flatMap { [$0.sunrise, $0.sunset].compactMap(\.self) }
-            + forecast.airQuality.map(\.date)
+        return changes
     }
 }
 

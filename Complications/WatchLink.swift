@@ -111,14 +111,19 @@ final class WatchLink: NSObject, WCSessionDelegate, Sendable {
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
         guard PhoneBatteryReading.isRequest(message) else { return replyHandler([:]) }
-        // Delegate calls come on a background queue; UIDevice needs the main thread.
-        let reading = DispatchQueue.main.sync { MainActor.assumeIsolated { PhoneBatteryReading.current() } }
-        let location = PhoneLocation.current()
-        if let reading {
-            Sent.last = reading
+        // Delegate calls come on a background queue; UIDevice and CLLocationManager want the main thread. The reply
+        // goes from there rather than this queue waiting on main, which could deadlock if main were waiting on the
+        // session.
+        let reply = Reply(send: replyHandler)
+        Task { @MainActor in
+            let reading = PhoneBatteryReading.current()
+            let location = PhoneLocation.current()
+            if let reading {
+                Sent.last = reading
+            }
+            Sent.lastLocation = location ?? Sent.lastLocation
+            reply.send(Self.message(reading, location, AccentColor.saved(in: .standard)))
         }
-        Sent.lastLocation = location ?? Sent.lastLocation
-        replyHandler(Self.message(reading, location, AccentColor.saved(in: .standard)))
     }
 }
 
@@ -129,6 +134,11 @@ extension AccentColor {
         UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
         self.init(date: .now, red: red, green: green, blue: blue)
     }
+}
+
+/// A reply handler, which WatchConnectivity lets us call from any thread but doesn't mark `Sendable`.
+private struct Reply: @unchecked Sendable {
+    let send: ([String: Any]) -> Void
 }
 
 @MainActor
@@ -146,9 +156,11 @@ extension PhoneBatteryReading {
     }
 }
 
+@MainActor
 extension PhoneLocation {
     /// The system's latest fix, which other apps and the system keep fresh; reading it never starts the GPS, so it
-    /// works in the background with When In Use access. `nil` without location access.
+    /// works in the background with When In Use access. `nil` without location access. On the main thread, which
+    /// Core Location wants a manager made on.
     static func current() -> PhoneLocation? {
         let manager = CLLocationManager()
         switch manager.authorizationStatus {

@@ -26,7 +26,8 @@ struct WeatherTimelineEntry: TimelineEntry {
 
 /// Reloads every hour (the system may stretch that) and fills the gap with the hourly forecast. The forecast is the
 /// one `WeatherSnapshot` shares with Up Next, so a reload often fetches nothing. When a fetch fails, the last good
-/// one is shown instead, while it's under `WeatherForecast.horizon` old and from about the same place.
+/// one is shown instead, while it's under `WeatherForecast.horizon` old and from about the same place; the timeline
+/// ends with the no-data icon at that age.
 struct WeatherProvider: TimelineProvider {
     func placeholder(in _: Context) -> WeatherTimelineEntry {
         WeatherTimelineEntry(date: .now, weather: WeatherEntry.samples[0])
@@ -44,18 +45,27 @@ struct WeatherProvider: TimelineProvider {
     func getTimeline(in _: Context, completion: @escaping @Sendable (Timeline<WeatherTimelineEntry>) -> Void) {
         Task {
             let now = Date.now
-            var forecast: [WeatherEntry] = []
             let location = PhoneLocation.saved()
-            if let location,
-               let snapshot = await (try? WeatherSnapshot.latest(for: location, now: now))
-               ?? WeatherSnapshot.fallback(for: location, maxAge: WeatherForecast.horizon, now: now) {
-                forecast = WeatherForecast.entries(from: snapshot, now: now)
+            var snapshot: WeatherSnapshot?
+            if let location {
+                snapshot = await (try? WeatherSnapshot.latest(for: location, now: now))
+                    ?? WeatherSnapshot.fallback(for: location, maxAge: WeatherForecast.horizon, now: now)
             }
-            let entries = forecast.isEmpty
-                ? [WeatherTimelineEntry(date: now, weather: nil, hasLocation: location != nil)]
-                : forecast.map { WeatherTimelineEntry(date: max($0.date, now), weather: $0) }
-            let retry: TimeInterval = forecast.isEmpty ? 15 * 60 : 60 * 60
-            completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(retry))))
+            let forecast = snapshot.map { WeatherForecast.entries(from: $0, now: now) } ?? []
+            guard let snapshot, !forecast.isEmpty else {
+                completion(Timeline(
+                    entries: [WeatherTimelineEntry(date: now, weather: nil, hasLocation: location != nil)],
+                    policy: .after(now.addingTimeInterval(15 * 60))
+                ))
+                return
+            }
+            // `horizon` after the fetch the no-data icon takes over, in case the system puts off the next reload that
+            // long: past its last entry the face would keep showing that hour's temperature.
+            let expiry = snapshot.date.addingTimeInterval(WeatherForecast.horizon)
+            let entries = forecast.filter { $0.date < expiry }.map {
+                WeatherTimelineEntry(date: max($0.date, now), weather: $0)
+            } + [WeatherTimelineEntry(date: expiry, weather: nil)]
+            completion(Timeline(entries: entries, policy: .after(min(now.addingTimeInterval(60 * 60), expiry))))
         }
     }
 }

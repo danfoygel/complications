@@ -40,6 +40,11 @@ struct CalendarScreen: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged, object: store)) { _ in
             load()
+            // The extension isn't told of changes; a reload while the app is in front doesn't count against its
+            // budget, so the face catches up now rather than at the next scheduled one.
+            if scenePhase == .active {
+                WidgetCenter.shared.reloadTimelines(ofKind: Route.calendar.widgetKind)
+            }
         }
     }
 

@@ -10,29 +10,29 @@
 
         var body: some View {
             VStack(spacing: 0) {
-            Grid(horizontalSpacing: 14, verticalSpacing: 12) {
-                GridRow {
-                    battery(0.65, phone: 0.95).overlay(bounds)
-                    weather(3).overlay(bounds)
-                    weather(0).overlay(bounds)
+                Grid(horizontalSpacing: 14, verticalSpacing: 12) {
+                    GridRow {
+                        battery(0.65, phone: 0.95).overlay(bounds)
+                        weather(3).overlay(bounds)
+                        weather(0).overlay(bounds)
+                    }
+                    GridRow {
+                        weather(1)
+                        weather(2)
+                        battery(0.5, phone: 0.4, phoneDate: .distantPast)
+                    }
+                    GridRow {
+                        battery(0.08, phone: 0.3)
+                        battery(1, phone: 0.08)
+                        battery(0.82, phone: nil)
+                    }
                 }
-                GridRow {
-                    weather(1)
-                    weather(2)
-                    battery(0.5, phone: 0.4, phoneDate: .distantPast)
+                VStack(spacing: 2) {
+                    ForEach(Array(Self.weatherLines.enumerated()), id: \.offset) { _, line in
+                        WeatherLineView(line: line).frame(width: 162)
+                    }
                 }
-                GridRow {
-                    battery(0.08, phone: 0.3)
-                    battery(1, phone: 0.08)
-                    battery(0.82, phone: nil)
-                }
-            }
-            VStack(spacing: 2) {
-                ForEach(Array(Self.weatherLines.enumerated()), id: \.offset) { _, line in
-                    WeatherLineView(line: line).frame(width: 162)
-                }
-            }
-            .padding(.top, 10)
+                .padding(.top, 10)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.black)

@@ -52,6 +52,18 @@ struct BatteryForecastTests {
         #expect(BatteryForecast.record(reading(minutes: 5, level: 0.49), in: defaults).count == 2)
         #expect(BatteryForecast.record(reading(minutes: 6, level: 0.49, pluggedIn: true), in: defaults).count == 1)
     }
+
+    @Test func recordKeepsTheLastReadingAcrossALongGap() throws {
+        let defaults = try #require(UserDefaults(suiteName: "BatteryForecastGapTests"))
+        defaults.removePersistentDomain(forName: "BatteryForecastGapTests")
+        _ = BatteryForecast.record(reading(minutes: 0, level: 0.8), in: defaults)
+        // Reloads 90 minutes apart, past the hour's window: still a rate.
+        let history = BatteryForecast.record(reading(minutes: 90, level: 0.7), in: defaults)
+        #expect(history.count == 2)
+        #expect(BatteryForecast.rate(history) != nil)
+        // Past the longest gap, though, it starts over.
+        #expect(BatteryForecast.record(reading(minutes: 90 + 181, level: 0.5), in: defaults).count == 1)
+    }
 }
 
 struct RouteTests {
@@ -97,6 +109,18 @@ struct PhoneBatteryTests {
         #expect(result[1].level == 0.8)
         #expect(!(result[0].phone?.isStale(at: result[0].date) ?? true))
         #expect(result[1].phone?.isStale(at: result[1].date) == true)
+    }
+
+    @Test func reloadsOnlyForAChangeOnTheFace() {
+        let shown = PhoneBatteryReading(date: start, level: 0.5, isPluggedIn: false)
+        let soon = start.addingTimeInterval(10 * 60)
+        #expect(PhoneBatteryReading(date: soon, level: 0.501, isPluggedIn: false).needsReload(after: nil, at: soon))
+        #expect(!PhoneBatteryReading(date: soon, level: 0.501, isPluggedIn: false).needsReload(after: shown, at: soon))
+        #expect(PhoneBatteryReading(date: soon, level: 0.49, isPluggedIn: false).needsReload(after: shown, at: soon))
+        #expect(PhoneBatteryReading(date: soon, level: 0.5, isPluggedIn: true).needsReload(after: shown, at: soon))
+        // The timeline dims `shown` an hour after it; with that under half an hour away, reload to keep it lit.
+        let later = start.addingTimeInterval(35 * 60)
+        #expect(PhoneBatteryReading(date: later, level: 0.5, isPluggedIn: false).needsReload(after: shown, at: later))
     }
 
     @Test func noStaleEntryForAnAlreadyStaleReading() {

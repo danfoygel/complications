@@ -42,8 +42,11 @@ struct BatteryProvider: TimelineProvider {
             } else {
                 [BatteryEntry(date: now, level: nil)]
             }
+            let phone = PhoneBatteryReading.saved()
+            // So the watch app can tell whether a newer reading changes anything here.
+            PhoneBatteryReading.setInTimeline(phone)
             completion(Timeline(
-                entries: BatteryForecast.adding(.saved(), to: entries),
+                entries: BatteryForecast.adding(phone, to: entries),
                 policy: .after(now.addingTimeInterval(30 * 60))
             ))
         }

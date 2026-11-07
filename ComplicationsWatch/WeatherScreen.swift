@@ -93,9 +93,10 @@ struct WeatherScreen: View {
             return
         }
         locationDate = location.date
-        let previous = WeatherSnapshot.cached()?.date
+        let previous = WeatherSnapshot.cachedSummary()?.date
         do {
-            let snapshot = try await WeatherSnapshot.latest(for: location)
+            // Someone's looking, so a fetch that's been failing is tried again now rather than after its backoff.
+            let snapshot = try await WeatherSnapshot.latest(for: location, retryingNow: true)
             // A new fetch: hand it to the complications, which may have failed their own and be waiting to retry.
             // Reloads asked for while the app is in front don't count against their budget.
             if snapshot.date != previous {

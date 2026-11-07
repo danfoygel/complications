@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The phone's battery, what the watch has been sent, and how to set up the automations that keep it current.
+/// The phone's battery, what the watch has been sent, the complications' accent color, and how to set up the
+/// automations that keep the watch current.
 struct PhoneView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var locator = Locator()
@@ -9,6 +10,9 @@ struct PhoneView: View {
     @State private var lastLocation: PhoneLocation?
     @State private var status: WatchLink.Status?
     @State private var outcome: String?
+    @State private var accent = (AccentColor.saved(in: .standard) ?? .standard).color
+    /// Sends a new accent once the picker has settled, rather than on every step of a drag.
+    @State private var accentSend: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -35,6 +39,15 @@ struct PhoneView: View {
                     if let outcome {
                         Text(outcome).font(.footnote).foregroundStyle(.secondary)
                     }
+                }
+                Section {
+                    ColorPicker("Accent color", selection: $accent, supportsOpacity: false)
+                } footer: {
+                    Text("""
+                    On a full-color face the complications draw their titles, symbols and high or low in this \
+                    color. The battery outline shows its level instead: green over 50%, yellow over 20%, \
+                    otherwise red.
+                    """)
                 }
                 if let status {
                     Section("Watch") {
@@ -67,6 +80,15 @@ struct PhoneView: View {
             await locator.requestAccess()
             await locator.refresh()
             await send()
+        }
+        .onChange(of: accent) {
+            AccentColor(accent).save(in: .standard)
+            accentSend?.cancel()
+            accentSend = Task {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                await send()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
             Task { await send() }

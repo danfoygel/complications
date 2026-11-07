@@ -4,7 +4,8 @@ import WidgetKit
 /// The watch's percent over the phone's, inside a battery outline split in two: the top half is the watch's battery,
 /// the bottom half the phone's. Both halves fill from the middle of the left side, the watch's clockwise over the top
 /// and the phone's counter-clockwise under the bottom, so each drains back toward the left. A stale phone reading is
-/// dimmed rather than hidden; with no reading yet its half is empty.
+/// dimmed rather than hidden; with no reading yet its half is empty. In full color each half shows its level
+/// (`color(for:)`) and both numbers are white.
 /// In `Shared/` so the app's debug gallery can show it too.
 struct BatteryComplicationView: View {
     let entry: BatteryEntry
@@ -13,11 +14,11 @@ struct BatteryComplicationView: View {
         GeometryReader { geometry in
             let side = min(geometry.size.width, geometry.size.height)
             ZStack {
-                half(entry.level, tint: .green, isTop: true, side: side)
-                half(entry.phone?.level, tint: .blue, isTop: false, side: side)
+                half(entry.level, isTop: true, side: side)
+                half(entry.phone?.level, isTop: false, side: side)
                     .opacity(isPhoneStale ? 0.4 : 1)
-                percent(entry.percent, color: .white, centerY: Layout.watchNumberY, side: side)
-                percent(entry.phone?.percent, color: .cyan, centerY: Layout.phoneNumberY, side: side)
+                percent(entry.percent, centerY: Layout.watchNumberY, side: side)
+                percent(entry.phone?.percent, centerY: Layout.phoneNumberY, side: side)
                     .opacity(isPhoneStale ? 0.4 : 1)
             }
             .frame(width: side, height: side)
@@ -29,7 +30,14 @@ struct BatteryComplicationView: View {
         entry.phone?.isStale(at: entry.date) ?? false
     }
 
-    private func half(_ level: Double?, tint: Color, isTop: Bool, side: Double) -> some View {
+    /// Green over 50%, yellow over 20%, otherwise red; gray with no level to show.
+    nonisolated static func color(for level: Double?) -> Color {
+        guard let level else { return .gray }
+        return level > 0.5 ? .green : level > 0.2 ? .yellow : .red
+    }
+
+    private func half(_ level: Double?, isTop: Bool, side: Double) -> some View {
+        let tint = Self.color(for: level)
         let shape = BatteryHalf(isTop: isTop)
         let style = StrokeStyle(lineWidth: side * Layout.thickness, lineCap: .round, lineJoin: .round)
         // Each end stops short of the split by half the gap plus its rounded cap, as a share of the half's length.
@@ -41,17 +49,17 @@ struct BatteryComplicationView: View {
             shape.trim(from: inset, to: 1 - inset).stroke(tint.opacity(Layout.trackOpacity), style: style)
             shape
                 .trim(from: inset, to: inset + filled)
-                .stroke((level ?? 0) <= 0.1 ? .red : tint, style: style)
+                .stroke(tint, style: style)
         }
         .widgetAccentable()
         .frame(width: side, height: side)
     }
 
-    private func percent(_ value: Int?, color: Color, centerY: Double, side: Double) -> some View {
+    private func percent(_ value: Int?, centerY: Double, side: Double) -> some View {
         Text(value.map(String.init) ?? "--")
             .font(.system(size: Layout.fontSize, weight: .semibold))
             .monospacedDigit()
-            .foregroundStyle(color)
+            .foregroundStyle(.white)
             .lineLimit(1)
             .minimumScaleFactor(0.5)
             .frame(width: side * Layout.textWidth)

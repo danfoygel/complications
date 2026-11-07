@@ -6,7 +6,7 @@ import WidgetKit
 /// In `Shared/` so the app's debug gallery can show it too.
 struct TemperatureView: View {
     let weather: WeatherEntry
-    @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.complicationAccent) private var accent
 
     var body: some View {
         GeometryReader { geometry in
@@ -26,9 +26,8 @@ struct TemperatureView: View {
                             Text(Temperature.number(next.temperature))
                                 .font(.system(size: 12, weight: .semibold))
                         }
-                        // On a tinted face it's in the face's accent color, at full strength since the color
-                        // already sets it apart from the temperature.
-                        .foregroundStyle(.white.opacity(renderingMode == .accented ? 1 : 0.78))
+                        // In the accent color, or the face's tint on a tinted face.
+                        .foregroundStyle(accent)
                         .widgetAccentable()
                     }
                 }

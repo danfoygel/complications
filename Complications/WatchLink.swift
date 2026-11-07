@@ -1,10 +1,11 @@
 import CoreLocation
 import Foundation
+import SwiftUI
 import UIKit
 import WatchConnectivity
 
 /// The phone's side of WatchConnectivity: answers the watch's requests for a reading and pushes readings to it,
-/// each with the phone's location for the watch's weather.
+/// each with the phone's location for the watch's weather and the picked accent color.
 final class WatchLink: NSObject, WCSessionDelegate, Sendable {
     static let shared = WatchLink()
 
@@ -23,9 +24,9 @@ final class WatchLink: NSObject, WCSessionDelegate, Sendable {
         case sent(woke: Bool)
     }
 
-    /// Sends the current reading and location. A complication transfer, which wakes the watch app and is limited to
-    /// about 50 a day, only goes out when the percent has moved `transferStep` or the charger state has changed since
-    /// the last one, or the phone has moved `PhoneLocation.significantDistance`.
+    /// Sends the current reading, location and accent color. A complication transfer, which wakes the watch app and is
+    /// limited to about 50 a day, only goes out when the percent has moved `transferStep` or the charger state has
+    /// changed since the last one, the phone has moved `PhoneLocation.significantDistance`, or a new accent was picked.
     @discardableResult
     @MainActor func send() async -> Outcome {
         start()
@@ -36,22 +37,33 @@ final class WatchLink: NSObject, WCSessionDelegate, Sendable {
         guard session.isWatchAppInstalled else { return .noWatchApp }
 
         let location = PhoneLocation.current()
-        let message = reading.message.merging(location?.message ?? [:]) { first, _ in first }
+        let accent = AccentColor.saved(in: .standard)
+        let message = Self.message(reading, location, accent)
         try? session.updateApplicationContext(message)
         let last = Sent.lastTransfer
         let remaining = session.remainingComplicationUserInfoTransfers
         let moved = last.map { abs($0.percent - reading.percent) >= Self.transferStep(remaining: remaining) } ?? true
         let changed = moved || last?.isPluggedIn != reading.isPluggedIn
             || location.map { $0.isFar(from: Sent.lastTransferLocation) } ?? false
+            || accent.map { $0.date != Sent.lastTransferAccent?.date } ?? false
         let woke = changed && session.isComplicationEnabled && remaining > 0
         if woke {
             session.transferCurrentComplicationUserInfo(message)
             Sent.lastTransfer = reading
             Sent.lastTransferLocation = location ?? Sent.lastTransferLocation
+            Sent.lastTransferAccent = accent ?? Sent.lastTransferAccent
         }
         Sent.last = reading
         Sent.lastLocation = location ?? Sent.lastLocation
         return .sent(woke: woke)
+    }
+
+    private static func message(
+        _ reading: PhoneBatteryReading?, _ location: PhoneLocation?, _ accent: AccentColor?
+    ) -> [String: Any] {
+        [reading?.message, location?.message, accent?.message].compactMap(\.self).reduce(into: [:]) {
+            $0.merge($1) { first, _ in first }
+        }
     }
 
     /// How far the percent has to move to spend a complication transfer: every percent while more than half the day's
@@ -106,7 +118,16 @@ final class WatchLink: NSObject, WCSessionDelegate, Sendable {
             Sent.last = reading
         }
         Sent.lastLocation = location ?? Sent.lastLocation
-        replyHandler((reading?.message ?? [:]).merging(location?.message ?? [:]) { first, _ in first })
+        replyHandler(Self.message(reading, location, AccentColor.saved(in: .standard)))
+    }
+}
+
+extension AccentColor {
+    /// A color from the picker, picked now.
+    init(_ color: Color) {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        self.init(date: .now, red: red, green: green, blue: blue)
     }
 }
 
@@ -161,6 +182,12 @@ enum Sent {
     static var lastTransferLocation: PhoneLocation? {
         get { load("lastTransferLocation") }
         set { store(newValue, "lastTransferLocation") }
+    }
+
+    /// The accent in the last complication transfer, so only a new pick spends another.
+    static var lastTransferAccent: AccentColor? {
+        get { load("lastTransferAccent") }
+        set { store(newValue, "lastTransferAccent") }
     }
 
     private static func load<Value: Decodable>(_ key: String) -> Value? {

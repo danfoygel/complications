@@ -45,6 +45,14 @@ struct PrecipitationOutlook: Equatable, Sendable {
         }
     }
 
+    /// Equal when `text` (and the kind) would be, without formatting a date.
+    var appearance: String {
+        switch timing {
+        case let .onDay(day): "\(kind.rawValue) on \(day.timeIntervalSinceReferenceDate)"
+        default: "\(kind.rawValue) \(text)"
+        }
+    }
+
     /// Under an hour, minutes to the nearest 5 (at least 5); otherwise hours to the nearest one.
     static func duration(_ interval: TimeInterval) -> String {
         let minutes = max(5, Int((interval / 60 / 5).rounded()) * 5)
@@ -67,14 +75,26 @@ struct PrecipitationTotal: Equatable, Sendable {
         text(locale: .current)
     }
 
-    func text(locale: Locale) -> String {
+    /// Equal when `text` would be, without formatting a measurement.
+    var appearance: String {
+        "\(kind.rawValue) \(shown(locale: .current).amount.value)"
+    }
+
+    /// The amount in the locale's unit, rounded as shown, and the decimals it's shown with.
+    private func shown(locale: Locale) -> (amount: Measurement<UnitLength>, digits: Int) {
         let usage: MeasurementFormatUnitUsage<UnitLength> = kind == .rain ? .rainfall : .snowfall
-        let value = Measurement(value: amount, unit: UnitLength.millimeters)
+        var value = Measurement(value: amount, unit: UnitLength.millimeters)
             .converted(to: UnitLength(forLocale: locale, usage: usage))
         let digits = value.value < 9.95 ? 1 : 0
-        let shown = (value.value * pow(10, Double(digits))).rounded() / pow(10, Double(digits))
+        value.value = (value.value * pow(10, Double(digits))).rounded() / pow(10, Double(digits))
+        return (value, digits)
+    }
+
+    func text(locale: Locale) -> String {
+        let (rounded, digits) = shown(locale: locale)
+        let shown = rounded.value
         func format(_ number: Double) -> String {
-            Measurement(value: number, unit: value.unit).formatted(.measurement(
+            Measurement(value: number, unit: rounded.unit).formatted(.measurement(
                 width: .narrow, usage: .asProvided,
                 numberFormatStyle: .number.precision(.fractionLength(digits)).locale(locale)
             ).locale(locale))
@@ -221,16 +241,25 @@ extension WeatherForecast {
 
     /// The `kind` expected in the `totalWindow` after `date`: water for rain, snow as it lies for snow. The hour
     /// that `date` falls in counts only for what's left of it. `nil` unless `hours` (in order) cover the whole window.
+    /// Sleet and mixed count as snow but may come with no snowfall at all; then it's their water, as rain.
     static func total(of kind: PrecipitationSpan.Kind, after date: Date, hours: [ForecastHour]) -> PrecipitationTotal? {
         let windowEnd = date.addingTimeInterval(totalWindow)
         guard let last = hours.last, last.date.addingTimeInterval(60 * 60) >= windowEnd else { return nil }
-        let amount = hours.reduce(0.0) { sum, hour in
-            let start = max(hour.date, date)
-            let end = min(hour.date.addingTimeInterval(60 * 60), windowEnd)
-            guard end > start else { return sum }
-            let perHour = kind == .rain ? hour.precipitationAmount : hour.snowfallAmount
-            return sum + perHour * end.timeIntervalSince(start) / (60 * 60)
+        func sum(_ amount: (ForecastHour) -> Double) -> Double {
+            hours.reduce(0.0) { sum, hour in
+                let start = max(hour.date, date)
+                let end = min(hour.date.addingTimeInterval(60 * 60), windowEnd)
+                guard end > start else { return sum }
+                return sum + amount(hour) * end.timeIntervalSince(start) / (60 * 60)
+            }
         }
-        return PrecipitationTotal(kind: kind, amount: amount)
+        let water = sum(\.precipitationAmount)
+        if kind == .snow {
+            let snow = sum(\.snowfallAmount)
+            if snow > 0 || water == 0 {
+                return PrecipitationTotal(kind: .snow, amount: snow)
+            }
+        }
+        return PrecipitationTotal(kind: .rain, amount: water)
     }
 }

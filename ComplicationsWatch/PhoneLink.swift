@@ -13,6 +13,9 @@ final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
     /// Updates arrive on the session's queue and from `refresh()` at once; one at a time, an older one can't
     /// overwrite a newer one between checking and saving.
     private let storing = Mutex(())
+    /// The ask under way, which other callers join rather than sending their own (the app becoming active and the
+    /// screen it opens both refresh).
+    private let asking = Mutex<Task<Void, Never>?>(nil)
 
     func start() {
         activation.start(delegate: self)
@@ -25,10 +28,25 @@ final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
         if let saved = PhoneBatteryReading.saved(), Date.now.timeIntervalSince(saved.date) < maxAge {
             return saved
         }
-        start()
-        await activation.wait()
-        if let update = await ask(timeout: timeout) {
-            store(update)
+        let task = asking.withLock { asking in
+            if let asking {
+                return asking
+            }
+            let task = Task {
+                start()
+                await activation.wait()
+                if let update = await ask(timeout: timeout) {
+                    store(update)
+                }
+            }
+            asking = task
+            return task
+        }
+        await task.value
+        asking.withLock { asking in
+            if asking == task {
+                asking = nil
+            }
         }
         return PhoneBatteryReading.saved()
     }
@@ -60,16 +78,28 @@ final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
 
     private func store(_ update: PhoneUpdate) {
         storing.withLock { _ in
-            if let reading = update.reading, reading.save() {
+            let shown = PhoneBatteryReading.inTimeline()
+            if let reading = update.reading, reading.save(), reading.needsReload(after: shown, at: .now) {
                 Route.battery.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
             }
-            if let location = update.location {
-                let previous = PhoneLocation.saved()
-                if location.save(), location.isFar(from: previous) {
-                    Route.weather.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
-                }
+            if let location = update.location, location.save() {
+                reloadWeatherIfMoved(to: location)
             }
         }
+    }
+
+    /// Reloads the weather complications after a significant move from both where the saved forecast is for and where
+    /// they were last reloaded for (so a fetch that keeps failing there doesn't earn a reload with every reading),
+    /// however many small steps the move came in.
+    private func reloadWeatherIfMoved(to location: PhoneLocation) {
+        let key = "weatherReloadLocation"
+        let reloaded = AppGroup.defaults.data(forKey: key)
+            .flatMap { try? JSONDecoder().decode(PhoneLocation.self, from: $0) }
+        guard location.isFar(from: WeatherSnapshot.cachedSummary()?.location), location.isFar(from: reloaded) else {
+            return
+        }
+        AppGroup.defaults.set(try? JSONEncoder().encode(location), forKey: key)
+        Route.weather.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
     }
 
     // MARK: WCSessionDelegate

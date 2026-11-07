@@ -142,15 +142,21 @@ struct WeatherSnapshot: Codable, Sendable {
     }
 
     /// The saved snapshot when it's fresh, else a new one, saved for the others. Throws when the fetch fails or
-    /// takes longer than `fetchLimit`.
-    static func latest(for location: PhoneLocation, now: Date = .now) async throws -> WeatherSnapshot {
+    /// takes longer than `fetchLimit`, and without trying while recent failures for about this place say to wait
+    /// (`Backoff`), unless `retryingNow` (someone is looking at the Weather screen).
+    static func latest(
+        for location: PhoneLocation, now: Date = .now, retryingNow: Bool = false
+    ) async throws -> WeatherSnapshot {
         if let saved = cached(), saved.isFresh(at: now, for: location) {
             return saved
         }
-        let snapshot = try await SharedFetch.shared.snapshot(for: location)
-        snapshot.save()
-        return snapshot
+        if !retryingNow {
+            try Backoff.check(backoffKey, at: now, for: location)
+        }
+        return try await SharedFetch.shared.snapshot(for: location)
     }
+
+    fileprivate static let backoffKey = "weatherBackoff"
 
     /// The saved snapshot as a stand-in when a fetch fails: only one from about the same place as `location` and
     /// under `maxAge` old, so a forecast from before a trip, or from days ago, isn't shown as this one.
@@ -158,9 +164,9 @@ struct WeatherSnapshot: Codable, Sendable {
         for location: PhoneLocation?,
         maxAge: TimeInterval,
         now: Date = .now,
-        in defaults: UserDefaults = AppGroup.defaults
+        at url: URL? = fileURL
     ) -> WeatherSnapshot? {
-        guard let location, let saved = cached(in: defaults),
+        guard let location, let saved = cached(at: url),
               now.timeIntervalSince(saved.date) < maxAge, !location.isFar(from: saved.location) else { return nil }
         return saved
     }
@@ -187,19 +193,37 @@ struct WeatherSnapshot: Codable, Sendable {
         )
     }
 
-    static func cached(in defaults: UserDefaults = AppGroup.defaults) -> WeatherSnapshot? {
-        defaults.data(forKey: cacheKey).flatMap { try? JSONDecoder().decode(WeatherSnapshot.self, from: $0) }
+    /// Where the last fetch is saved. It's tens of kilobytes of WeatherKit's encoding, too much for the app group's
+    /// defaults (which every process using them keeps in memory), so it's a file in the group's container.
+    static let fileURL = AppGroup.containerURL?.appendingPathComponent("weatherSnapshot.json")
+
+    static func cached(at url: URL? = fileURL) -> WeatherSnapshot? {
+        guard let url, let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(WeatherSnapshot.self, from: data)
     }
 
-    func save(in defaults: UserDefaults = AppGroup.defaults) {
-        defaults.set(try? JSONEncoder().encode(self), forKey: Self.cacheKey)
+    /// When and where the saved fetch was made, without building its forecasts.
+    struct Summary: Decodable {
+        var date: Date
+        var location: PhoneLocation
     }
 
-    private static let cacheKey = "weatherSnapshot"
+    static func cachedSummary(at url: URL? = fileURL) -> Summary? {
+        guard let url, let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(Summary.self, from: data)
+    }
+
+    func save(to url: URL? = Self.fileURL) {
+        guard let url, let data = try? JSONEncoder().encode(self) else { return }
+        try? data.write(to: url, options: .atomic)
+        // Where earlier builds kept it.
+        AppGroup.defaults.removeObject(forKey: "weatherSnapshot")
+    }
 }
 
 /// Both complications often reload at once (when the face changes, say); this has the second wait for the first's
 /// fetch instead of making its own, when it's for about the same place. They run in the same extension process.
+/// The fetch saves what it gets and records the outcome in the `Backoff`, once however many are waiting for it.
 private actor SharedFetch {
     static let shared = SharedFetch()
 
@@ -210,8 +234,16 @@ private actor SharedFetch {
             return try await running.task.value
         }
         let task = Task {
-            try await Deadline.run(within: WeatherSnapshot.fetchLimit) {
-                try await WeatherSnapshot.fetch(for: location)
+            do {
+                let snapshot = try await Deadline.run(within: WeatherSnapshot.fetchLimit) {
+                    try await WeatherSnapshot.fetch(for: location)
+                }
+                snapshot.save()
+                Backoff.reset(WeatherSnapshot.backoffKey)
+                return snapshot
+            } catch {
+                Backoff.recordFailure(WeatherSnapshot.backoffKey, at: .now, for: location)
+                throw error
             }
         }
         running = (location, task)

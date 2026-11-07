@@ -27,12 +27,11 @@ struct AccentColorTests {
     }
 
     @Test func batteryColorFollowsTheLevel() {
-        #expect(BatteryComplicationView.color(for: 1) == .green)
-        #expect(BatteryComplicationView.color(for: 0.51) == .green)
-        #expect(BatteryComplicationView.color(for: 0.5) == .yellow)
-        #expect(BatteryComplicationView.color(for: 0.21) == .yellow)
-        #expect(BatteryComplicationView.color(for: 0.2) == .red)
-        #expect(BatteryComplicationView.color(for: 0) == .red)
-        #expect(BatteryComplicationView.color(for: nil) == .gray)
+        let accent = pink.color
+        #expect(BatteryComplicationView.color(for: 1, accent: accent) == accent)
+        #expect(BatteryComplicationView.color(for: 0.2, accent: accent) == accent)
+        #expect(BatteryComplicationView.color(for: 0.19, accent: accent) == .red)
+        #expect(BatteryComplicationView.color(for: 0, accent: accent) == .red)
+        #expect(BatteryComplicationView.color(for: nil, accent: accent) == .gray)
     }
 }

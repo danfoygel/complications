@@ -2,9 +2,8 @@ import Foundation
 import SwiftUI
 
 /// The complications' accent color, picked in the iPhone app. In full color everything the face would tint is drawn in
-/// it (the battery outline aside, which shows its level instead). Travels alongside `PhoneBatteryReading` in the same
-/// messages, under its own key; the phone keeps its pick in its own defaults and the watch the latest it received in
-/// the app group.
+/// it (the battery outline turns red when low). Travels alongside `PhoneBatteryReading` in the same messages, under its
+/// own key; the phone keeps its pick in its own defaults and the watch the latest it received in the app group.
 struct AccentColor: Codable, Equatable, Sendable {
     /// When it was picked, so an older pick arriving late doesn't replace a newer one.
     var date: Date

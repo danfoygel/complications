@@ -4,11 +4,12 @@ import WidgetKit
 /// The watch's percent over the phone's, inside a battery outline split in two: the top half is the watch's battery,
 /// the bottom half the phone's. Both halves fill from the middle of the left side, the watch's clockwise over the top
 /// and the phone's counter-clockwise under the bottom, so each drains back toward the left. A stale phone reading is
-/// dimmed rather than hidden; with no reading yet its half is empty. In full color each half shows its level
-/// (`color(for:)`) and both numbers are white.
+/// dimmed rather than hidden; with no reading yet its half is empty. In full color each half is in the accent color,
+/// red when low (`color(for:accent:)`), and both numbers are white.
 /// In `Shared/` so the app's debug gallery can show it too.
 struct BatteryComplicationView: View {
     let entry: BatteryEntry
+    @Environment(\.complicationAccent) private var accent
 
     var body: some View {
         GeometryReader { geometry in
@@ -30,14 +31,14 @@ struct BatteryComplicationView: View {
         entry.phone?.isStale(at: entry.date) ?? false
     }
 
-    /// Green over 50%, yellow over 20%, otherwise red; gray with no level to show.
-    nonisolated static func color(for level: Double?) -> Color {
+    /// Red under 20%, otherwise `accent`; gray with no level to show.
+    nonisolated static func color(for level: Double?, accent: Color) -> Color {
         guard let level else { return .gray }
-        return level > 0.5 ? .green : level > 0.2 ? .yellow : .red
+        return level < 0.2 ? .red : accent
     }
 
     private func half(_ level: Double?, isTop: Bool, side: Double) -> some View {
-        let tint = Self.color(for: level)
+        let tint = Self.color(for: level, accent: accent)
         let shape = BatteryHalf(isTop: isTop)
         let style = StrokeStyle(lineWidth: side * Layout.thickness, lineCap: .round, lineJoin: .round)
         // Each end stops short of the split by half the gap plus its rounded cap, as a share of the half's length.

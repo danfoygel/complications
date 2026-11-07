@@ -44,9 +44,8 @@ struct PhoneView: View {
                     ColorPicker("Accent color", selection: $accent, supportsOpacity: false)
                 } footer: {
                     Text("""
-                    On a full-color face the complications draw their titles, symbols and high or low in this \
-                    color. The battery outline shows its level instead: green over 50%, yellow over 20%, \
-                    otherwise red.
+                    On a full-color face the complications draw their titles, symbols, high or low, and battery \
+                    outline in this color. The battery outline turns red under 20%.
                     """)
                 }
                 if let status {

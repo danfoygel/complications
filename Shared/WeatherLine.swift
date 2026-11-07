@@ -1,4 +1,5 @@
 import SwiftUI
+import Synchronization
 import WidgetKit
 
 /// The bottom line of Up Next. With rain or snow in the next 24 hours: the total for them at the left and when it
@@ -85,16 +86,39 @@ struct WeatherLine: Equatable, Sendable {
 /// Times as Up Next shows them: the locale's format without AM/PM, which takes too much width.
 enum ClockTime {
     /// "9:05", or "09:05" in 24-hour locales. (`.hour(.defaultDigits(amPM: .omitted))` gives "09:05" in en_US.)
-    static let format =
-        (DateFormatter.dateFormat(fromTemplate: "jmm", options: 0, locale: .current) ?? "j:mm")
+    /// Read each time, so switching between 12- and 24-hour time shows at the next render, not the extension's next
+    /// launch.
+    static var format: String {
+        (DateFormatter.dateFormat(fromTemplate: "jmm", options: 0, locale: .autoupdatingCurrent) ?? "j:mm")
             .replacingOccurrences(of: "a", with: "")
             .trimmingCharacters(in: .whitespaces)
+    }
 
     static func string(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = format
-        return formatter.string(from: date)
+        string(date, format: format)
     }
+
+    /// `date` in `format`, with `amSymbol` and `pmSymbol` when given. Formatters are slow to make and a timeline
+    /// draws many entries, so each one is made once and kept.
+    static func string(_ date: Date, format: String, amSymbol: String? = nil, pmSymbol: String? = nil) -> String {
+        let key = [Locale.autoupdatingCurrent.identifier, format, amSymbol ?? "", pmSymbol ?? ""].joined(separator: "|")
+        return formatters.withLock { formatters in
+            let formatter = formatters[key] ?? {
+                let formatter = DateFormatter()
+                formatter.locale = .autoupdatingCurrent
+                formatter.dateFormat = format
+                if let amSymbol, let pmSymbol {
+                    formatter.amSymbol = amSymbol
+                    formatter.pmSymbol = pmSymbol
+                }
+                return formatter
+            }()
+            formatters[key] = formatter
+            return formatter.string(from: date)
+        }
+    }
+
+    private static let formatters = Mutex<[String: DateFormatter]>([:])
 }
 
 /// In `Shared/` so the app's debug gallery can show it too. Every symbol is in one yellow.

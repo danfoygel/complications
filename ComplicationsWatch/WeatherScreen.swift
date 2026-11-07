@@ -10,7 +10,10 @@ struct WeatherScreen: View {
         case loaded(CurrentWeather, Forecast<HourWeather>, Forecast<DayWeather>, WeatherAttribution?)
     }
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var phase = Phase.loading
+    /// When the phone took the location the forecast is for.
+    @State private var locationDate: Date?
 
     var body: some View {
         List {
@@ -35,6 +38,12 @@ struct WeatherScreen: View {
                         )
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        // The forecast is for wherever the phone last was; say so when that was a while ago.
+                        if let locationDate, Date.now.timeIntervalSince(locationDate) > 60 * 60 {
+                            Text("Location from \(locationDate, format: .relative(presentation: .named))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 Section("Hourly") {
@@ -67,7 +76,11 @@ struct WeatherScreen: View {
             }
         }
         .navigationTitle("Weather")
-        .task { await load() }
+        // Again each time the app comes back; the saved forecast is reused while it's fresh, so that's cheap.
+        .task(id: scenePhase == .active) {
+            guard scenePhase == .active else { return }
+            await load()
+        }
     }
 
     private func load() async {
@@ -79,6 +92,7 @@ struct WeatherScreen: View {
             phase = .failed("Open Complications on the iPhone and allow location access to see the weather here.")
             return
         }
+        locationDate = location.date
         let previous = WeatherSnapshot.cached()?.date
         do {
             let snapshot = try await WeatherSnapshot.latest(for: location)

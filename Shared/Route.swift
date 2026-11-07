@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// A screen in the app, one per complication. Each complication sets its route's `url` as its `widgetURL`,
 /// and the app opens that screen when it receives the URL.
@@ -41,8 +42,18 @@ enum Route: String, CaseIterable, Hashable, Sendable {
 enum AppGroup {
     static let identifier = "group.com.danfoygel.complications"
 
-    /// Shared between the app and the widget extension.
-    static var defaults: UserDefaults {
-        UserDefaults(suiteName: identifier) ?? .standard
-    }
+    /// Shared between the app and the widget extension. One instance for every caller; `UserDefaults` is thread-safe.
+    nonisolated(unsafe) static let defaults: UserDefaults = {
+        // `UserDefaults(suiteName:)` succeeds without the entitlement too, it just isn't shared then; the container
+        // is what tells. (The hostless tests have none, and pass their own defaults.)
+        if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier) == nil {
+            Logger(subsystem: "com.danfoygel.complications", category: "AppGroup").fault(
+                """
+                No container for \(identifier, privacy: .public): check the entitlements. The app and the widgets \
+                won't see each other's data.
+                """
+            )
+        }
+        return UserDefaults(suiteName: identifier) ?? .standard
+    }()
 }

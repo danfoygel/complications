@@ -24,8 +24,8 @@ final class WatchLink: NSObject, WCSessionDelegate, Sendable {
     }
 
     /// Sends the current reading and location. A complication transfer, which wakes the watch app and is limited to
-    /// about 50 a day, only goes out when the percent or charger state has changed since the last one, or the phone
-    /// has moved `PhoneLocation.significantDistance`.
+    /// about 50 a day, only goes out when the percent has moved `transferStep` or the charger state has changed since
+    /// the last one, or the phone has moved `PhoneLocation.significantDistance`.
     @discardableResult
     @MainActor func send() async -> Outcome {
         start()
@@ -39,9 +39,11 @@ final class WatchLink: NSObject, WCSessionDelegate, Sendable {
         let message = reading.message.merging(location?.message ?? [:]) { first, _ in first }
         try? session.updateApplicationContext(message)
         let last = Sent.lastTransfer
-        let changed = last?.percent != reading.percent || last?.isPluggedIn != reading.isPluggedIn
+        let remaining = session.remainingComplicationUserInfoTransfers
+        let moved = last.map { abs($0.percent - reading.percent) >= Self.transferStep(remaining: remaining) } ?? true
+        let changed = moved || last?.isPluggedIn != reading.isPluggedIn
             || location.map { $0.isFar(from: Sent.lastTransferLocation) } ?? false
-        let woke = changed && session.isComplicationEnabled && session.remainingComplicationUserInfoTransfers > 0
+        let woke = changed && session.isComplicationEnabled && remaining > 0
         if woke {
             session.transferCurrentComplicationUserInfo(message)
             Sent.lastTransfer = reading
@@ -50,6 +52,12 @@ final class WatchLink: NSObject, WCSessionDelegate, Sendable {
         Sent.last = reading
         Sent.lastLocation = location ?? Sent.lastLocation
         return .sent(woke: woke)
+    }
+
+    /// How far the percent has to move to spend a complication transfer: every percent while more than half the day's
+    /// transfers are left, then every 5%, so a day of background sends doesn't use them up before the evening.
+    static func transferStep(remaining: Int) -> Int {
+        remaining > 25 ? 1 : 5
     }
 
     struct Status: Sendable {

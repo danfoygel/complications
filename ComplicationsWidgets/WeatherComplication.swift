@@ -25,14 +25,15 @@ struct WeatherTimelineEntry: TimelineEntry {
 
 /// Reloads every hour (the system may stretch that) and fills the gap with the hourly forecast. The forecast is the
 /// one `WeatherSnapshot` shares with Up Next, so a reload often fetches nothing. When a fetch fails, the last good
-/// one is shown instead.
+/// one is shown instead, while it's under `WeatherForecast.horizon` old and from about the same place.
 struct WeatherProvider: TimelineProvider {
     func placeholder(in _: Context) -> WeatherTimelineEntry {
         WeatherTimelineEntry(date: .now, weather: WeatherEntry.samples[0])
     }
 
     func getSnapshot(in context: Context, completion: @escaping @Sendable (WeatherTimelineEntry) -> Void) {
-        let cached = WeatherSnapshot.cached().flatMap { WeatherForecast.entries(from: $0).first }
+        let cached = WeatherSnapshot.fallback(for: .saved(), maxAge: WeatherForecast.horizon)
+            .flatMap { WeatherForecast.entries(from: $0).first }
         completion(
             cached.map { WeatherTimelineEntry(date: .now, weather: $0) }
                 ?? (context.isPreview ? placeholder(in: context) : WeatherTimelineEntry(date: .now, weather: nil))
@@ -45,7 +46,8 @@ struct WeatherProvider: TimelineProvider {
             var forecast: [WeatherEntry] = []
             let location = PhoneLocation.saved()
             if let location,
-               let snapshot = await (try? WeatherSnapshot.latest(for: location, now: now)) ?? WeatherSnapshot.cached() {
+               let snapshot = await (try? WeatherSnapshot.latest(for: location, now: now))
+               ?? WeatherSnapshot.fallback(for: location, maxAge: WeatherForecast.horizon, now: now) {
                 forecast = WeatherForecast.entries(from: snapshot, now: now)
             }
             let entries = forecast.isEmpty

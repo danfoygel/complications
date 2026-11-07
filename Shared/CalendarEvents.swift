@@ -34,12 +34,13 @@ enum CalendarEvents {
         return await (try? EKEventStore().requestFullAccessToEvents()) ?? false
     }
 
-    /// Events overlapping `start..<end`, earliest first; empty without calendar access.
-    static func events(from start: Date, to end: Date) -> [CalendarEvent] {
+    /// Events overlapping `start..<end`, earliest first, leaving out cancelled ones and ones the user declined; empty
+    /// without calendar access.
+    static func events(from start: Date, to end: Date, in store: EKEventStore = EKEventStore()) -> [CalendarEvent] {
         guard isAuthorized else { return [] }
-        let store = EKEventStore()
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
         return store.events(matching: predicate)
+            .filter { $0.status != .canceled && !$0.isDeclined }
             .map(CalendarEvent.init)
             .sorted { ($0.start, $0.end) < ($1.start, $1.end) }
     }
@@ -61,9 +62,7 @@ enum CalendarEvents {
     /// Up to `lines` timed events to show at `date`, from `events` sorted by start. All-day events and ones longer
     /// than `longestShown` are never shown.
     static func upNext(at date: Date, in events: [CalendarEvent], lines: Int = 3) -> UpNext {
-        let timed = events.filter {
-            !$0.isAllDay && $0.end.timeIntervalSince($0.start) <= longestShown && $0.end > date
-        }
+        let timed = events.filter { $0.isShown && $0.end > date }
         let lead = timed.first.flatMap { $0.start <= date.addingTimeInterval(leadWindow) ? $0 : nil }
         let rest = timed.dropFirst(lead == nil ? 0 : 1)
         return UpNext(lead: lead, rest: Array(rest.prefix(lead == nil ? lines : lines - 1)))
@@ -71,6 +70,11 @@ enum CalendarEvents {
 }
 
 extension CalendarEvent {
+    /// Whether Up Next ever shows it: timed, and no longer than `CalendarEvents.longestShown`.
+    var isShown: Bool {
+        !isAllDay && end.timeIntervalSince(start) <= CalendarEvents.longestShown
+    }
+
     init(_ event: EKEvent) {
         let srgb = event.calendar.cgColor.flatMap {
             $0.converted(to: CGColorSpace(name: CGColorSpace.sRGB)!, intent: .defaultIntent, options: nil)
@@ -90,6 +94,13 @@ extension CalendarEvent {
     /// "10:00 – 10:30 AM", or "All day".
     var timeRange: String {
         isAllDay ? "All day" : (start ..< end).formatted(.interval.hour().minute())
+    }
+}
+
+private extension EKEvent {
+    /// An invitation the user turned down, which stays on their calendar.
+    var isDeclined: Bool {
+        attendees?.first(where: \.isCurrentUser)?.participantStatus == .declined
     }
 }
 

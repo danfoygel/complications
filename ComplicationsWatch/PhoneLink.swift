@@ -3,9 +3,9 @@ import Synchronization
 import WatchConnectivity
 import WidgetKit
 
-/// The watch's side of WatchConnectivity: receives the phone's battery readings and location, and asks for them while
-/// the app is open. Every newer reading is saved for the complication, which is then reloaded; so is every newer
-/// location, reloading the weather only after a significant move.
+/// The watch's side of WatchConnectivity: receives the phone's battery readings, location and accent color, and asks
+/// for them while the app is open. Every newer reading is saved for the complication, which is then reloaded; so is
+/// every newer location, reloading the weather only after a significant move, and every newer accent, reloading all.
 final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
     static let shared = PhoneLink()
 
@@ -85,6 +85,9 @@ final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
             if let location = update.location, location.save() {
                 reloadWeatherIfMoved(to: location)
             }
+            if let accent = update.accent, accent.save(in: AppGroup.defaults) {
+                WidgetCenter.shared.reloadAllTimelines()
+            }
         }
     }
 
@@ -119,14 +122,16 @@ final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
     }
 }
 
-/// What one message from the phone carried: a battery reading, its location, or both.
+/// What one message from the phone carried: any of a battery reading, its location and the accent color.
 private struct PhoneUpdate: Sendable {
     var reading: PhoneBatteryReading?
     var location: PhoneLocation?
+    var accent: AccentColor?
 
     init(message: [String: Any]) {
         reading = PhoneBatteryReading(message: message)
         location = PhoneLocation(message: message)
+        accent = AccentColor(message: message)
     }
 }
 

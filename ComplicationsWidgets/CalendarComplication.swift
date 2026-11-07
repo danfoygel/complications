@@ -3,13 +3,14 @@ import WidgetKit
 
 /// The next two events, one per line, over a weather line: with rain or snow ahead, the 24-hour total and when it
 /// starts or stops; otherwise the next sunrise or sunset and the air quality.
-/// One that's on now or starts within the hour leads, large and in its calendar's color. With no forecast, a third
+/// One that's on now or starts within the hour leads, large and in the accent color. With no forecast, a third
 /// event takes the weather line's place. Text sizes are fixed points for the 41mm watch rather than text styles, so
 /// they don't follow the watch's Text Size setting.
 struct CalendarComplication: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: Route.calendar.widgetKind, provider: CalendarProvider()) { entry in
             CalendarComplicationView(entry: entry)
+                .environment(\.complicationAccent, AccentColor.current.color)
                 .containerBackground(.fill.tertiary, for: .widget)
                 .widgetURL(Route.calendar.url)
         }
@@ -121,6 +122,7 @@ struct CalendarProvider: TimelineProvider {
 
 struct CalendarComplicationView: View {
     let entry: CalendarEntry
+    @Environment(\.complicationAccent) private var accent
 
     var body: some View {
         // The width to fit titles to; see FittedText.
@@ -170,7 +172,7 @@ struct CalendarComplicationView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Label("Calendar", systemImage: "calendar")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(accent)
                     .widgetAccentable()
                 Text(entry.isAuthorized ? "No more events" : "Open to allow access")
                     .font(.system(size: 16, weight: .semibold))
@@ -184,13 +186,14 @@ struct CalendarComplicationView: View {
         let time = event.start <= entry.date ? "until \(clock(event.end))" : clock(event.start)
         return HStack(spacing: 5) {
             Capsule()
-                .fill(Color(event.color))
+                .fill(accent)
                 .frame(width: 4, height: 18)
                 .widgetAccentable()
             FittedText(
                 event.title, size: 16, weight: .semibold,
                 width: width - 4 - 5 - 5 - labelWidth(time)
             )
+            .foregroundStyle(accent)
             .widgetAccentable()
             Spacer(minLength: 0)
             Text(time)

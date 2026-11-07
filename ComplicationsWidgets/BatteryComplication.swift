@@ -6,6 +6,7 @@ struct BatteryComplication: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: Route.battery.widgetKind, provider: BatteryProvider()) { entry in
             BatteryComplicationView(entry: entry)
+                .environment(\.complicationAccent, AccentColor.current.color)
                 .containerBackground(.fill.tertiary, for: .widget)
                 .widgetURL(Route.battery.url)
         }

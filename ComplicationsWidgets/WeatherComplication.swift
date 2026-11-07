@@ -6,6 +6,7 @@ struct WeatherComplication: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: Route.weather.widgetKind, provider: WeatherProvider()) { entry in
             WeatherComplicationView(entry: entry)
+                .environment(\.complicationAccent, AccentColor.current.color)
                 .containerBackground(.fill.tertiary, for: .widget)
                 .widgetURL(Route.weather.url)
         }

@@ -131,9 +131,10 @@ enum ClockTime {
     private static let formatters = Mutex<[String: DateFormatter]>([:])
 }
 
-/// In `Shared/` so the app's debug gallery can show it too. Every symbol is in one yellow.
+/// In `Shared/` so the app's debug gallery can show it too. Every symbol is in the accent color.
 struct WeatherLineView: View {
     let line: WeatherLine
+    @Environment(\.complicationAccent) private var accent
 
     var body: some View {
         HStack(spacing: 3) {
@@ -162,7 +163,7 @@ struct WeatherLineView: View {
 
     private func symbol(_ view: some View) -> some View {
         view
-            .foregroundStyle(.yellow)
+            .foregroundStyle(accent)
             .widgetAccentable()
     }
 }

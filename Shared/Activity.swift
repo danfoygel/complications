@@ -50,7 +50,14 @@ struct ActivityEntry: TimelineEntry {
 
 enum ActivitySummaries {
     private static let store = HKHealthStore()
-    private static let types: Set<HKObjectType> = [.activitySummaryType()]
+    /// The summary for the rings, and the samples behind them for the Activity screen's hourly charts.
+    private static let types: Set<HKObjectType> = [
+        .activitySummaryType(),
+        HKQuantityType(.activeEnergyBurned),
+        HKQuantityType(.appleMoveTime),
+        HKQuantityType(.appleExerciseTime),
+        HKCategoryType(.appleStandHour),
+    ]
     private static let key = "activityRings"
 
     /// Asks for access the first time; afterwards it returns without prompting. HealthKit never says whether reading
@@ -81,6 +88,44 @@ enum ActivitySummaries {
         return current(saved(), now: now, calendar: calendar)
     }
 
+    /// Today's hour-by-hour Move (in `unit`), Exercise minutes and stood hours, for the Activity screen. Hours
+    /// HealthKit can't read (no access) are empty.
+    static func hours(
+        moveUnit: ActivityRings.MoveUnit, now: Date = .now, calendar: Calendar = .current
+    ) async -> ActivityHours {
+        let day = calendar.startOfDay(for: now)
+        let end = calendar.date(byAdding: .day, value: 1, to: day)!
+        let today = HKQuery.predicateForSamples(withStart: day, end: end)
+        func hourly(_ identifier: HKQuantityTypeIdentifier, _ unit: HKUnit) async -> [(Date, Double)] {
+            let query = HKStatisticsCollectionQueryDescriptor(
+                predicate: .quantitySample(type: HKQuantityType(identifier), predicate: today),
+                options: .cumulativeSum,
+                anchorDate: day,
+                intervalComponents: DateComponents(hour: 1)
+            )
+            guard let collection = try? await query.result(for: store) else { return [] }
+            return collection.statistics().compactMap { statistics in
+                statistics.sumQuantity().map { (statistics.startDate, $0.doubleValue(for: unit)) }
+            }
+        }
+        let move = moveUnit == .minutes
+            ? await hourly(.appleMoveTime, .minute())
+            : await hourly(.activeEnergyBurned, .kilocalorie())
+        let exercise = await hourly(.appleExerciseTime, .minute())
+        let standQuery = HKSampleQueryDescriptor(
+            predicates: [.categorySample(type: HKCategoryType(.appleStandHour), predicate: today)],
+            sortDescriptors: []
+        )
+        let stood = await ((try? standQuery.result(for: store)) ?? [])
+            .filter { $0.value == HKCategoryValueAppleStandHour.stood.rawValue }
+            .map { ($0.startDate, 1.0) }
+        return ActivityHours(
+            move: ActivityHours.buckets(move, day: day, calendar: calendar),
+            exercise: ActivityHours.buckets(exercise, day: day, calendar: calendar),
+            stand: ActivityHours.buckets(stood, day: day, calendar: calendar)
+        )
+    }
+
     static func saved(in defaults: UserDefaults = AppGroup.defaults) -> ActivityRings? {
         defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(ActivityRings.self, from: $0) }
     }
@@ -99,6 +144,27 @@ enum ActivitySummaries {
         guard let rings, let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
         else { return [ActivityEntry(date: now, rings: rings)] }
         return [ActivityEntry(date: now, rings: rings), ActivityEntry(date: midnight, rings: rings.reset(to: midnight))]
+    }
+}
+
+/// A day's activity hour by hour, 24 slots from midnight, as the Activity app charts it.
+struct ActivityHours: Equatable, Sendable {
+    var move: [Double]
+    var exercise: [Double]
+    /// 1 for each hour stood in, else 0.
+    var stand: [Double]
+
+    static let empty = ActivityHours(move: hourSlots, exercise: hourSlots, stand: hourSlots)
+    private static let hourSlots = [Double](repeating: 0, count: 24)
+
+    /// `values` added up into the hour of the day each starts in. By clock hour, so a daylight-saving day still has 24
+    /// slots (the repeated hour shares one); values from other days are left out.
+    static func buckets(_ values: [(Date, Double)], day: Date, calendar: Calendar = .current) -> [Double] {
+        var slots = hourSlots
+        for (date, value) in values where calendar.isDate(date, inSameDayAs: day) {
+            slots[calendar.component(.hour, from: date)] += value
+        }
+        return slots
     }
 }
 

@@ -49,3 +49,26 @@ struct ActivityRingsTests {
         #expect(ActivitySummaries.saved(in: defaults) == .sample)
     }
 }
+
+struct ActivityHoursTests {
+    private let calendar = Calendar(identifier: .gregorian)
+
+    @Test func addsValuesUpByHour() {
+        let day = calendar.date(from: DateComponents(year: 2026, month: 11, day: 7))!
+        let minute = { (minutes: Double) in day.addingTimeInterval(minutes * 60) }
+        let slots = ActivityHours.buckets(
+            [
+                (minute(5), 10), (minute(50), 2.5), (minute(6 * 60 + 1), 30), (minute(23 * 60 + 59), 1),
+                // The days either side.
+                (minute(-1), 99), (minute(24 * 60), 99),
+            ],
+            day: day,
+            calendar: calendar
+        )
+        #expect(slots.count == 24)
+        #expect(slots[0] == 12.5)
+        #expect(slots[6] == 30)
+        #expect(slots[23] == 1)
+        #expect(slots.reduce(0, +) == 43.5)
+    }
+}

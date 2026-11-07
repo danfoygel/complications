@@ -157,42 +157,51 @@ struct WeatherLineView: View {
     }
 }
 
-/// The top half of a sun (with both horizontal rays) over a small ▼ before a sunset; flipped, a ▲ over the bottom
-/// half before a sunrise.
+/// An arrow whose head sits where `sun.max.fill`'s disc was, with that half's rays around it: pointing up before a
+/// sunrise, flipped to point down before a sunset. Slightly blurred so it reads as soft as the rays at 15 pt.
 struct SunSymbol: View {
     let isSunrise: Bool
 
     var body: some View {
         Image(systemName: "sun.max.fill")
-            .mask(HalfSunMask())
-            .overlay(SunsetTriangle().fill())
-            .scaleEffect(y: isSunrise ? -1 : 1)
+            .mask(SunRaysMask())
+            .overlay(SunArrow().fill())
+            .scaleEffect(y: isSunrise ? 1 : -1)
+            .blur(radius: 0.4)
     }
 }
 
-/// The top half of `sun.max.fill`'s bounds, plus a strip at the middle of each side for the horizontal rays.
-private struct HalfSunMask: Shape {
+/// The rays of `sun.max.fill`'s top half, including the horizontal ones, without its disc.
+private struct SunRaysMask: Shape {
     func path(in rect: CGRect) -> Path {
-        var path = Path(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height / 2))
+        var half = Path(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height / 2))
         // The rays end 0.18 of the width in from each side and the disc starts at 0.26.
         let strip = CGSize(width: rect.width * 0.22, height: rect.height * 0.12)
         let stripY = rect.midY - strip.height / 2
-        path.addRect(CGRect(origin: CGPoint(x: rect.minX, y: stripY), size: strip))
-        path.addRect(CGRect(origin: CGPoint(x: rect.maxX - strip.width, y: stripY), size: strip))
-        return path
+        half.addRect(CGRect(origin: CGPoint(x: rect.minX, y: stripY), size: strip))
+        half.addRect(CGRect(origin: CGPoint(x: rect.maxX - strip.width, y: stripY), size: strip))
+        let radius = rect.width * 0.27
+        let disc = Path(ellipseIn: CGRect(
+            x: rect.midX - radius, y: rect.midY - radius, width: radius * 2, height: radius * 2
+        ))
+        return half.subtracting(disc)
     }
 }
 
-/// A ▼ in the bottom half, a little below the cut and narrower than the disc.
-private struct SunsetTriangle: Shape {
+/// An up arrow: a ▲ in the disc's place, its base on the middle line, and a stem down into the bottom half.
+private struct SunArrow: Shape {
     func path(in rect: CGRect) -> Path {
-        let top = rect.minY + rect.height * 0.61
-        let halfWidth = rect.width * 0.17
         var path = Path()
-        path.move(to: CGPoint(x: rect.midX - halfWidth, y: top))
-        path.addLine(to: CGPoint(x: rect.midX + halfWidth, y: top))
-        path.addLine(to: CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.83))
+        let halfBase = rect.width * 0.25
+        path.move(to: CGPoint(x: rect.midX - halfBase, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.midX + halfBase, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.midY - rect.height * 0.27))
         path.closeSubpath()
+        let stemWidth = rect.width * 0.13
+        path.addRect(CGRect(
+            x: rect.midX - stemWidth / 2, y: rect.midY,
+            width: stemWidth, height: rect.minY + rect.height * 0.86 - rect.midY
+        ))
         return path
     }
 }

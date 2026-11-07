@@ -1,10 +1,14 @@
+import EventKit
 import SwiftUI
 import WidgetKit
 
-/// The rest of today's events and all of tomorrow's.
+/// The rest of today's events and all of tomorrow's, kept current while it's open.
 struct CalendarScreen: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var days: [(day: Date, events: [CalendarEvent])] = []
     @State private var isAuthorized = CalendarEvents.isAuthorized
+    /// Kept for as long as the screen is open: EventKit only reports changes to a store that's still around.
+    @State private var store = EKEventStore()
 
     var body: some View {
         List {
@@ -24,12 +28,17 @@ struct CalendarScreen: View {
             }
         }
         .navigationTitle("Calendar")
-        .task {
+        // Again each time the app comes back, so events that ended while it was away drop off.
+        .task(id: scenePhase == .active) {
+            guard scenePhase == .active else { return }
             let wasAuthorized = isAuthorized
             isAuthorized = await CalendarEvents.requestAccess()
             if isAuthorized != wasAuthorized {
                 WidgetCenter.shared.reloadTimelines(ofKind: Route.calendar.widgetKind)
             }
+            load()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged, object: store)) { _ in
             load()
         }
     }
@@ -41,7 +50,7 @@ struct CalendarScreen: View {
         let today = calendar.startOfDay(for: now)
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
         let after = calendar.date(byAdding: .day, value: 1, to: tomorrow)!
-        let events = CalendarEvents.events(from: now, to: after)
+        let events = CalendarEvents.events(from: now, to: after, in: store)
         days = [today, tomorrow].map { day in
             (day, events.filter { calendar.isDate(max($0.start, now), inSameDayAs: day) })
         }

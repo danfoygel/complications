@@ -125,4 +125,19 @@ struct WeatherLineTests {
         let empty = PrecipitationForecast(minutes: [], hours: [], days: [])
         #expect(WeatherLine(at: start, forecast: empty) == nil)
     }
+
+    /// Why the fetch asks for two days of hours: with WeatherKit's default 25, an entry two hours after the fetch no
+    /// longer has the 24 hours ahead covered, and its rain drops off the line.
+    @Test func twoDaysOfHoursKeepRainOnLaterEntries() {
+        let later = time(8)
+        #expect(WeatherLine(at: later, forecast: forecast(hours: 48, rainFrom: 20))?.outlook != nil)
+        #expect(WeatherLine(at: time(2), forecast: forecast(hours: 25, rainFrom: 20))?.outlook == nil)
+    }
+
+    @Test func clockTimesKeepTheirOwnSymbols() {
+        let date = Calendar.current.date(bySettingHour: 21, minute: 5, second: 0, of: start)!
+        #expect(ClockTime.string(date, format: "h:mma", amSymbol: "am", pmSymbol: "pm") == "9:05pm")
+        #expect(ClockTime.string(date, format: "h:mma", amSymbol: "a", pmSymbol: "p") == "9:05p")
+        #expect(ClockTime.string(date, format: "HH:mm") == "21:05")
+    }
 }

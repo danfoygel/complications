@@ -109,7 +109,9 @@ extension BatteryReading {
         device.isBatteryMonitoringEnabled = true
         let level = device.batteryLevel
         guard level >= 0 else { return nil }
-        return BatteryReading(date: .now, level: min(1, Double(level)), isPluggedIn: device.batteryState != .unplugged)
+        // As the phone reads it: an unknown state isn't taken for charging, which would also start a new history.
+        let isPluggedIn = device.batteryState == .charging || device.batteryState == .full
+        return BatteryReading(date: .now, level: min(1, Double(level)), isPluggedIn: isPluggedIn)
     }
 }
 

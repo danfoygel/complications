@@ -43,6 +43,10 @@ struct CalendarProvider: TimelineProvider {
     /// that have ended. A week of entries keeps it right until the next reload comes.
     static let horizon: TimeInterval = 7 * 24 * 60 * 60
 
+    /// How old a saved forecast can be and still stand in when a fetch fails. Past a day, its rain no longer covers
+    /// the line's 24 hours, and a third event is more use than sunrise times from an old forecast.
+    static let fallbackAge: TimeInterval = 24 * 60 * 60
+
     func placeholder(in _: Context) -> CalendarEntry {
         CalendarEntry(date: .now, events: CalendarEvent.samples, isAuthorized: true, forecast: .sample)
     }
@@ -55,7 +59,7 @@ struct CalendarProvider: TimelineProvider {
                 ? placeholder(in: context)
                 : CalendarEntry(
                     date: now, events: events, isAuthorized: CalendarEvents.isAuthorized,
-                    forecast: WeatherSnapshot.cached().map {
+                    forecast: WeatherSnapshot.fallback(for: .saved(), maxAge: Self.fallbackAge).map {
                         var forecast = PrecipitationForecast($0)
                         forecast.airQuality = AirQuality.cached()
                         return forecast
@@ -74,7 +78,9 @@ struct CalendarProvider: TimelineProvider {
             // A later day's events show their weekday, so each midnight changes what's shown.
             let today = Calendar.current.startOfDay(for: now)
             let midnights = (1 ... 8).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: today) }
-            let eventChanges = events.flatMap {
+            // Only events the complication can show; an all-day one's start and end would be entries that look just
+            // like the one before.
+            let eventChanges = events.filter(\.isShown).flatMap {
                 [$0.start.addingTimeInterval(-CalendarEvents.leadWindow), $0.start, $0.end]
             }
             let weatherChanges = forecast.map { WeatherLine.changes(after: now, forecast: $0) } ?? []
@@ -89,16 +95,15 @@ struct CalendarProvider: TimelineProvider {
     }
 
     /// The forecast `WeatherSnapshot` shares with the weather complication (fetched only when it's old), else the
-    /// last one saved, with the air quality (also fetched only when it's old).
+    /// last one saved for about the same place within `fallbackAge`, with the air quality (also fetched only when
+    /// it's old). Both fetches have time limits, so the events aren't held up for long by a poor connection.
     private static func forecast() async -> PrecipitationForecast? {
-        var snapshot: WeatherSnapshot?
-        var airQuality = AirQuality.cached()
-        if let location = PhoneLocation.saved() {
-            async let latestAirQuality = AirQuality.latest(for: location)
-            snapshot = try? await WeatherSnapshot.latest(for: location)
-            airQuality = await latestAirQuality
-        }
-        return (snapshot ?? WeatherSnapshot.cached()).map {
+        guard let location = PhoneLocation.saved() else { return nil }
+        async let latestAirQuality = AirQuality.latest(for: location)
+        let snapshot = await (try? WeatherSnapshot.latest(for: location))
+            ?? WeatherSnapshot.fallback(for: location, maxAge: fallbackAge)
+        let airQuality = await latestAirQuality
+        return snapshot.map {
             var forecast = PrecipitationForecast($0)
             forecast.airQuality = airQuality
             return forecast
@@ -211,18 +216,16 @@ struct CalendarComplicationView: View {
         if days >= 7 {
             return date.formatted(.dateTime.month(.abbreviated).day())
         }
-        let formatter = DateFormatter()
-        if ClockTime.format.contains("h") {
+        let format = ClockTime.format
+        if format.contains("h") {
             // Without the space before AM/PM, and without ":00", to fit beside the title.
             let onTheHour = calendar.component(.minute, from: date) == 0
             // The two-letter weekday ("EEEEEE") for the same reason.
-            formatter.dateFormat = onTheHour ? "EEEEEE ha" : "EEEEEE h:mma"
-            formatter.amSymbol = "am"
-            formatter.pmSymbol = "pm"
-        } else {
-            formatter.dateFormat = "EEEEEE " + ClockTime.format
+            return ClockTime.string(
+                date, format: onTheHour ? "EEEEEE ha" : "EEEEEE h:mma", amSymbol: "am", pmSymbol: "pm"
+            )
         }
-        return formatter.string(from: date)
+        return ClockTime.string(date, format: "EEEEEE " + format)
     }
 }
 

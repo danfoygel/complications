@@ -3,6 +3,7 @@ import WidgetKit
 
 /// The battery level with an estimate of time to empty, or to full while charging, and the phone's battery.
 struct BatteryScreen: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var history: [BatteryReading] = []
     @State private var phone = PhoneBatteryReading.saved()
 
@@ -33,7 +34,12 @@ struct BatteryScreen: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle("Battery")
-        .task { await refresh() }
+        // Only while the app is active, not in the minutes after the wrist drops: each reading reloads the
+        // complication and each ask wakes both radios.
+        .task(id: scenePhase == .active) {
+            guard scenePhase == .active else { return }
+            await refresh()
+        }
     }
 
     private var estimate: String {
@@ -45,7 +51,7 @@ struct BatteryScreen: View {
         return current.isPluggedIn ? "Full in about \(duration)" : "About \(duration) left"
     }
 
-    /// Takes a reading now and every minute while the screen is open, adding each to the shared history, and
+    /// Takes a reading now and every minute while the screen is open and active, adding each to the shared history, and
     /// asks the phone for its battery whenever the saved one is over 5 minutes old.
     private func refresh() async {
         while !Task.isCancelled {

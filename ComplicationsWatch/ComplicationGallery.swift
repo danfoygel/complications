@@ -1,7 +1,8 @@
 #if DEBUG
     import SwiftUI
 
-    /// The battery and weather complications' faces at their size on a 41mm watch (45 pt), for sample entries.
+    /// The battery, weather and activity complications' faces at their size on a 41mm watch (45 pt), for sample
+    /// entries.
     /// Real data rarely reaches the simulator (no battery, and WeatherKit usually fails there), so this is the way to
     /// see the faces there: `xcrun simctl launch <sim> com.danfoygel.complications.watchkitapp -complicationGallery`.
     /// The top row has a hairline at the complication's bounds.
@@ -9,30 +10,43 @@
         private let side: CGFloat = 45
 
         var body: some View {
-            VStack(spacing: 0) {
-                Grid(horizontalSpacing: 14, verticalSpacing: 12) {
-                    GridRow {
-                        battery(0.65, phone: 0.95).overlay(bounds)
-                        weather(3).overlay(bounds)
-                        weather(0).overlay(bounds)
+            // Scrolls on smaller watches, where the activity row and weather lines run off the bottom.
+            ScrollView {
+                VStack(spacing: 0) {
+                    Grid(horizontalSpacing: 14, verticalSpacing: 12) {
+                        GridRow {
+                            battery(0.65, phone: 0.95).overlay(bounds)
+                            weather(3).overlay(bounds)
+                            weather(0).overlay(bounds)
+                        }
+                        GridRow {
+                            weather(1)
+                            weather(2)
+                            battery(0.5, phone: 0.4, phoneDate: .distantPast)
+                        }
+                        GridRow {
+                            battery(0.08, phone: 0.3)
+                            battery(1, phone: 0.08)
+                            battery(0.82, phone: nil)
+                        }
+                        GridRow {
+                            activity(.sample)
+                            activity(ActivityRings(
+                                day: .now,
+                                move: .init(value: 1450, goal: 500),
+                                exercise: .init(value: 29, goal: 30),
+                                stand: .init(value: 12, goal: 12)
+                            ))
+                            activity(nil)
+                        }
                     }
-                    GridRow {
-                        weather(1)
-                        weather(2)
-                        battery(0.5, phone: 0.4, phoneDate: .distantPast)
+                    VStack(spacing: 2) {
+                        ForEach(Array(Self.weatherLines.enumerated()), id: \.offset) { _, line in
+                            WeatherLineView(line: line).frame(width: 162)
+                        }
                     }
-                    GridRow {
-                        battery(0.08, phone: 0.3)
-                        battery(1, phone: 0.08)
-                        battery(0.82, phone: nil)
-                    }
+                    .padding(.top, 10)
                 }
-                VStack(spacing: 2) {
-                    ForEach(Array(Self.weatherLines.enumerated()), id: \.offset) { _, line in
-                        WeatherLineView(line: line).frame(width: 162)
-                    }
-                }
-                .padding(.top, 10)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.black)
@@ -59,6 +73,10 @@
         private func weather(_ index: Int) -> some View {
             TemperatureView(weather: WeatherEntry.samples[index])
                 .frame(width: side, height: side)
+        }
+
+        private func activity(_ rings: ActivityRings?) -> some View {
+            ActivityRingsView(rings: rings).frame(width: side, height: side)
         }
 
         private func battery(_ level: Double, phone: Double?, phoneDate: Date = .now) -> some View {

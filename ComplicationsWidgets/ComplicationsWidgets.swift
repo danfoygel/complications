@@ -7,5 +7,6 @@ struct ComplicationsWidgets: WidgetBundle {
         CalendarComplication()
         BatteryComplication()
         WeatherComplication()
+        ActivityComplication()
     }
 }

@@ -55,12 +55,14 @@ targets:
       - Connectivity
     dependencies:
       - target: ComplicationsWidgets
-    # The app group shares battery history, the phone's battery, and cached weather with the widgets.
+    # The app group shares battery history, the phone's battery, cached weather and the last Activity rings with the
+    # widgets.
     entitlements:
       path: ComplicationsWatch/ComplicationsWatch.entitlements
       properties:
         com.apple.security.application-groups: [group.com.danfoygel.complications]
         com.apple.developer.weatherkit: true
+        com.apple.developer.healthkit: true
     info:
       path: ComplicationsWatch/Info.plist
       properties:
@@ -75,6 +77,7 @@ targets:
         INFOPLIST_KEY_WKApplication: YES
         INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.danfoygel.complications
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Shows your next event on the watch face.
+        INFOPLIST_KEY_NSHealthShareUsageDescription: Shows your Activity rings on the watch face.
 
   ComplicationsWidgets:
     type: app-extension
@@ -88,6 +91,7 @@ targets:
       properties:
         com.apple.security.application-groups: [group.com.danfoygel.complications]
         com.apple.developer.weatherkit: true
+        com.apple.developer.healthkit: true
     info:
       path: ComplicationsWidgets/Info.plist
       properties:
@@ -101,6 +105,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Complications
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Shows your next event on the watch face.
+        INFOPLIST_KEY_NSHealthShareUsageDescription: Shows your Activity rings on the watch face.
 
   # Hostless logic tests: Shared/ and Connectivity/ are compiled straight into the bundle.
   ComplicationsTests:

@@ -7,6 +7,7 @@ enum Route: String, CaseIterable, Hashable, Sendable {
     case calendar
     case battery
     case weather
+    case activity
 
     static let scheme = "complications"
 
@@ -25,6 +26,7 @@ enum Route: String, CaseIterable, Hashable, Sendable {
         case .calendar: "CalendarComplication"
         case .battery: "BatteryComplication"
         case .weather: "WeatherComplication"
+        case .activity: "ActivityComplication"
         }
     }
 
@@ -35,6 +37,7 @@ enum Route: String, CaseIterable, Hashable, Sendable {
         case .calendar: [widgetKind]
         case .battery: [widgetKind]
         case .weather: [widgetKind, Route.calendar.widgetKind]
+        case .activity: [widgetKind]
         }
     }
 }

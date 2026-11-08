@@ -52,7 +52,7 @@ struct ComplicationsWatchApp: App {
     }
 }
 
-/// A list of the three screens. A complication's URL replaces the navigation path with that complication's screen.
+/// A list of the four screens. A complication's URL replaces the navigation path with that complication's screen.
 /// Opening the app also asks the phone for its battery, which updates the battery complication.
 struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -71,6 +71,7 @@ struct RootView: View {
                 case .calendar: CalendarScreen()
                 case .battery: BatteryScreen()
                 case .weather: WeatherScreen()
+                case .activity: ActivityScreen()
                 }
             }
         }
@@ -93,6 +94,7 @@ extension Route {
         case .calendar: "Calendar"
         case .battery: "Battery"
         case .weather: "Weather"
+        case .activity: "Activity"
         }
     }
 
@@ -101,6 +103,7 @@ extension Route {
         case .calendar: "calendar"
         case .battery: "battery.75percent"
         case .weather: "cloud.sun"
+        case .activity: "figure.run"
         }
     }
 }

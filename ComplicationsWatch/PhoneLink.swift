@@ -3,9 +3,10 @@ import Synchronization
 import WatchConnectivity
 import WidgetKit
 
-/// The watch's side of WatchConnectivity: receives the phone's battery readings, location and accent color, and asks
-/// for them while the app is open. Every newer reading is saved for the complication, which is then reloaded; so is
-/// every newer location, reloading the weather only after a significant move, and every newer accent, reloading all.
+/// The watch's side of WatchConnectivity: receives the phone's battery readings, location, accent color and alarms,
+/// and asks for them while the app is open. Every newer reading is saved for the complication, which is then reloaded;
+/// so is every newer location, reloading the weather only after a significant move, every newer accent, reloading
+/// all, and every newer read of the alarms, reloading the calendar when they changed.
 final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
     static let shared = PhoneLink()
 
@@ -88,6 +89,11 @@ final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
             if let accent = update.accent, accent.save(in: AppGroup.defaults) {
                 WidgetCenter.shared.reloadAllTimelines()
             }
+            let alarms = PhoneAlarms.saved(in: AppGroup.defaults)
+            if let update = update.alarms, update.save(in: AppGroup.defaults), update.alarms != alarms?.alarms {
+                Route.calendar.widgetKinds.forEach(WidgetCenter.shared.reloadTimelines(ofKind:))
+                NotificationCenter.default.post(name: PhoneAlarms.didChange, object: nil)
+            }
         }
     }
 
@@ -122,17 +128,24 @@ final class PhoneLink: NSObject, WCSessionDelegate, Sendable {
     }
 }
 
-/// What one message from the phone carried: any of a battery reading, its location and the accent color.
+/// What one message from the phone carried: any of a battery reading, its location, the accent color and the alarms.
 private struct PhoneUpdate: Sendable {
     var reading: PhoneBatteryReading?
     var location: PhoneLocation?
     var accent: AccentColor?
+    var alarms: PhoneAlarms?
 
     init(message: [String: Any]) {
         reading = PhoneBatteryReading(message: message)
         location = PhoneLocation(message: message)
         accent = AccentColor(message: message)
+        alarms = PhoneAlarms(message: message)
     }
+}
+
+extension PhoneAlarms {
+    /// Posted when the phone sends alarms that differ from the ones saved, so an open calendar shows them.
+    static let didChange = Notification.Name("PhoneAlarmsDidChange")
 }
 
 /// Resumes a continuation with whichever comes first, the phone's reply or the timeout.

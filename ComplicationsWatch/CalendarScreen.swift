@@ -2,7 +2,7 @@ import EventKit
 import SwiftUI
 import WidgetKit
 
-/// The rest of today's events and all of tomorrow's, kept current while it's open.
+/// The rest of today's events and all of tomorrow's, with the phone's alarms, kept current while it's open.
 struct CalendarScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var days: [(day: Date, events: [CalendarEvent])] = []
@@ -19,7 +19,7 @@ struct CalendarScreen: View {
             ForEach(days, id: \.day) { day in
                 Section(day.day.formatted(.dateTime.weekday(.wide).month().day())) {
                     if day.events.isEmpty {
-                        Text("No events").foregroundStyle(.secondary)
+                        Text("No events or alarms").foregroundStyle(.secondary)
                     }
                     ForEach(day.events) { event in
                         EventRow(event: event)
@@ -46,16 +46,20 @@ struct CalendarScreen: View {
                 WidgetCenter.shared.reloadTimelines(ofKind: Route.calendar.widgetKind)
             }
         }
+        // Posted on the session's queue.
+        .onReceive(NotificationCenter.default.publisher(for: PhoneAlarms.didChange).receive(on: RunLoop.main)) { _ in
+            load()
+        }
     }
 
+    /// Alarms too without calendar access.
     private func load() {
-        guard isAuthorized else { return }
         let calendar = Calendar.current
         let now = Date.now
         let today = calendar.startOfDay(for: now)
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
         let after = calendar.date(byAdding: .day, value: 1, to: tomorrow)!
-        let events = CalendarEvents.events(from: now, to: after, in: store)
+        let events = CalendarEvents.eventsAndAlarms(from: now, to: after, in: store)
         days = [today, tomorrow].map { day in
             (day, events.filter { calendar.isDate(max($0.start, now), inSameDayAs: day) })
         }
@@ -71,7 +75,11 @@ private struct EventRow: View {
                 .fill(Color(event.color))
                 .frame(width: 4)
             VStack(alignment: .leading) {
-                Text(event.title).font(.headline)
+                if event.isAlarm {
+                    Text("\(Image(systemName: "alarm.fill")) \(event.title)").font(.headline)
+                } else {
+                    Text(event.title).font(.headline)
+                }
                 Text(event.timeRange).font(.caption).foregroundStyle(.secondary)
                 if let location = event.location {
                     Text(location).font(.caption).foregroundStyle(.secondary)

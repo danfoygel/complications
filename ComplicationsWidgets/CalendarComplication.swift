@@ -1,8 +1,8 @@
 import SwiftUI
 import WidgetKit
 
-/// The next two events, one per line, over a weather line: with rain or snow ahead, the 24-hour total and when it
-/// starts or stops; otherwise the next sunrise or sunset and the air quality.
+/// The next two events or phone alarms, one per line, over a weather line: with rain or snow ahead, the 24-hour total
+/// and when it starts or stops; otherwise the next sunrise or sunset and the air quality.
 /// One that's on now or starts within the hour leads, large and in the accent color. With no forecast, a third
 /// event takes the weather line's place. Text sizes are fixed points for the 41mm watch rather than text styles, so
 /// they don't follow the watch's Text Size setting.
@@ -15,7 +15,7 @@ struct CalendarComplication: Widget {
                 .widgetURL(Route.calendar.url)
         }
         .configurationDisplayName("Up Next")
-        .description("Your next calendar events, then rain or snow, or sunrise or sunset and air quality.")
+        .description("Your next calendar events and alarms, then rain or snow, or sunrise or sunset and air quality.")
         .supportedFamilies([.accessoryRectangular])
     }
 }
@@ -54,7 +54,7 @@ struct CalendarProvider: TimelineProvider {
 
     func getSnapshot(in context: Context, completion: @escaping @Sendable (CalendarEntry) -> Void) {
         let now = Date.now
-        let events = CalendarEvents.events(from: now, to: now.addingTimeInterval(24 * 60 * 60))
+        let events = CalendarEvents.eventsAndAlarms(from: now, to: now.addingTimeInterval(24 * 60 * 60))
         completion(
             context.isPreview && events.isEmpty
                 ? placeholder(in: context)
@@ -75,7 +75,7 @@ struct CalendarProvider: TimelineProvider {
             let horizon = now.addingTimeInterval(Self.horizon)
             let forecast = await Self.forecast()
             // Look past the horizon so an entry near its end can still find the event after.
-            let events = CalendarEvents.events(from: now, to: horizon.addingTimeInterval(24 * 60 * 60))
+            let events = CalendarEvents.eventsAndAlarms(from: now, to: horizon.addingTimeInterval(24 * 60 * 60))
             // A later day's events show their weekday, so each midnight changes what's shown.
             let today = Calendar.current.startOfDay(for: now)
             let midnights = (1 ... 8).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: today) }
@@ -159,10 +159,13 @@ struct CalendarComplicationView: View {
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                             .fixedSize()
-                        FittedText(
-                            event.title, size: 16, weight: .medium,
-                            width: width - labelWidth(label(event)) - 5
-                        )
+                        Group {
+                            alarmSymbol(event)
+                            FittedText(
+                                event.title, size: 16, weight: .medium,
+                                width: width - labelWidth(label(event)) - 5 - alarmSymbolRoom(event)
+                            )
+                        }
                         .foregroundStyle(upNext.lead == nil ? .primary : .secondary)
                     }
                 }
@@ -189,10 +192,13 @@ struct CalendarComplicationView: View {
                 .fill(accent)
                 .frame(width: 4, height: 18)
                 .widgetAccentable()
-            FittedText(
-                event.title, size: 16, weight: .semibold,
-                width: width - 4 - 5 - 5 - labelWidth(time)
-            )
+            Group {
+                alarmSymbol(event)
+                FittedText(
+                    event.title, size: 16, weight: .semibold,
+                    width: width - 4 - 5 - 5 - labelWidth(time) - alarmSymbolRoom(event)
+                )
+            }
             .foregroundStyle(accent)
             .widgetAccentable()
             Spacer(minLength: 0)
@@ -202,6 +208,24 @@ struct CalendarComplicationView: View {
                 .foregroundStyle(.secondary)
                 .layoutPriority(1)
         }
+    }
+
+    /// The width the alarm symbol is drawn in, the same for every alarm so titles line up.
+    private static let alarmSymbolWidth: CGFloat = 14
+
+    /// Before an alarm's title, so it reads as one rather than an event; nothing for an event.
+    @ViewBuilder private func alarmSymbol(_ event: CalendarEvent) -> some View {
+        if event.isAlarm {
+            // In a Text, so it sits on the row's baseline.
+            Text(Image(systemName: "alarm.fill"))
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: Self.alarmSymbolWidth)
+        }
+    }
+
+    /// The width the alarm symbol and the space after it take from the title.
+    private func alarmSymbolRoom(_ event: CalendarEvent) -> CGFloat {
+        event.isAlarm ? Self.alarmSymbolWidth + 5 : 0
     }
 
     /// The width of a time label, in its 13-point semibold with monospaced digits. Taken at Core Text's full measure:
@@ -242,90 +266,6 @@ struct CalendarComplicationView: View {
     }
 }
 
-/// One line of text cut off at the last whole character that fits, with no "…": on a complication that space is better
-/// spent on another character or two.
-///
-/// The fit is measured here with Core Text rather than left to SwiftUI layout. The watch face draws a complication's
-/// text itself, and with `ViewThatFits` choosing among the prefixes it still drew titles too long for their row and
-/// cut them off with "…".
-struct FittedText: View {
-    let text: String
-    let size: CGFloat
-    let weight: Font.Weight
-    let width: CGFloat
-
-    init(_ text: String, size: CGFloat, weight: Font.Weight, width: CGFloat) {
-        self.text = text
-        self.size = size
-        self.weight = weight
-        self.width = width
-    }
-
-    var body: some View {
-        Text(Self.longestPrefix(of: text, size: size, weight: weight, fitting: width))
-            .font(.system(size: size, weight: weight))
-            .lineLimit(1)
-    }
-
-    /// How wide the face draws text compared with Core Text's measure of the same font: measured on the Series 8 as
-    /// 0.94–0.946 for the titles, which matches SF Compact Display against SF Compact Text on the Mac.
-    static let drawnScale: CGFloat = 0.94
-
-    /// A little room to spare, for the spread in `drawnScale`.
-    private static let slack: CGFloat = 1
-
-    /// The longest prefix, without trailing spaces, that fits the width.
-    static func longestPrefix(of text: String, size: CGFloat, weight: Font.Weight, fitting width: CGFloat) -> String {
-        let prefixes = prefixes(of: text)
-        // Prefixes only get narrower, and the last, an empty one, always fits.
-        var low = 0
-        var high = prefixes.count - 1
-        while low < high {
-            let middle = (low + high) / 2
-            if Self.width(of: prefixes[middle], size: size, weight: weight) <= width - slack {
-                high = middle
-            } else {
-                low = middle + 1
-            }
-        }
-        return prefixes[low]
-    }
-
-    /// Every prefix, longest first, without trailing spaces and so without repeats.
-    static func prefixes(of text: String) -> [String] {
-        var prefixes: [String] = []
-        for length in stride(from: text.count, through: 0, by: -1) {
-            let prefix = String(text.prefix(length).trimmingCharacters(in: .whitespaces))
-            if prefix != prefixes.last {
-                prefixes.append(prefix)
-            }
-        }
-        return prefixes
-    }
-
-    /// The width the face draws one line of text at in the system font, optionally with monospaced digits as the labels
-    /// use.
-    static func width(
-        of text: String, size: CGFloat, weight: Font.Weight, monospacedDigits: Bool = false,
-        drawnScale: CGFloat = drawnScale
-    ) -> CGFloat {
-        let font = monospacedDigits
-            ? UIFont.monospacedDigitSystemFont(ofSize: size, weight: uiWeight(weight))
-            : UIFont.systemFont(ofSize: size, weight: uiWeight(weight))
-        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
-        return CTLineGetTypographicBounds(line, nil, nil, nil) * drawnScale
-    }
-
-    private static func uiWeight(_ weight: Font.Weight) -> UIFont.Weight {
-        switch weight {
-        case .semibold: .semibold
-        case .medium: .medium
-        case .bold: .bold
-        default: .regular
-        }
-    }
-}
-
 extension CalendarEvent {
     static let samples = [
         sample(id: "standup", "Standup", minutes: -5, length: 15, color: RGB(red: 0.04, green: 0.52, blue: 1)),
@@ -336,6 +276,11 @@ extension CalendarEvent {
         sample(id: "lunch", "Lunch with Sam", minutes: 145, length: 60, color: RGB(red: 0.19, green: 0.82, blue: 0.35)),
         sample(id: "priya", "1:1 with Priya", minutes: 235, length: 30, color: RGB(red: 0.75, green: 0.35, blue: 0.95)),
     ]
+
+    /// The samples with an alarm 40 minutes from now, between the standup and the review.
+    static let samplesWithAlarm = (samples + [
+        CalendarEvent(alarm: .init(hour: 0, minute: 0, weekdays: [], label: "Leave for school"), at: .now + 40 * 60)
+    ]).sorted { $0.start < $1.start }
 
     /// The samples two days later, so they show their weekday.
     static let laterSamples = samples.map {
@@ -370,6 +315,9 @@ extension CalendarEvent {
     CalendarEntry(date: .now.addingTimeInterval(40 * 60), events: CalendarEvent.samples, isAuthorized: true)
     // Later this week: each title right after its weekday, cut off without "…".
     CalendarEntry(date: .now, events: CalendarEvent.laterSamples, isAuthorized: true, forecast: .sample)
+    // An alarm after the standup, then leading without it. (Dated now: the canvas doesn't show entries dated later.)
+    CalendarEntry(date: .now, events: CalendarEvent.samplesWithAlarm, isAuthorized: true, forecast: .sample)
+    CalendarEntry(date: .now, events: CalendarEvent.samplesWithAlarm.filter { $0.id != "standup" }, isAuthorized: true)
     CalendarEntry(date: .now, events: [], isAuthorized: true)
     CalendarEntry(date: .now, events: [], isAuthorized: false)
 }

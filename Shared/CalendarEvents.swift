@@ -3,7 +3,8 @@ import EventKit
 import Foundation
 import SwiftUI
 
-/// A calendar event copied out of EventKit, so it can cross actors and live in timeline entries.
+/// A calendar event copied out of EventKit, or one of the phone's alarms ringing, so it can cross actors and live in
+/// timeline entries.
 struct CalendarEvent: Identifiable, Hashable, Sendable {
     var id: String
     var title: String
@@ -13,6 +14,8 @@ struct CalendarEvent: Identifiable, Hashable, Sendable {
     var location: String?
     /// The calendar's color as sRGB components.
     var color: RGB
+    /// One of the phone's alarms (`PhoneAlarms`), which starts and ends when it rings.
+    var isAlarm = false
 
     struct RGB: Hashable, Sendable {
         var red: Double
@@ -45,7 +48,27 @@ enum CalendarEvents {
             .sorted { ($0.start, $0.end) < ($1.start, $1.end) }
     }
 
-    /// What the complication lists at a moment: one line per event.
+    /// The phone's alarms that ring in `start..<end`, from the latest the phone sent, as events that start and end when
+    /// they ring. They don't need calendar access.
+    static func alarms(
+        from start: Date, to end: Date, in alarms: PhoneAlarms? = .saved(in: AppGroup.defaults)
+    ) -> [CalendarEvent] {
+        var seen = Set<String>()
+        // Two alarms alike (same time and label) would be the same line twice.
+        return (alarms?.rings(from: start, to: end) ?? [])
+            .map { CalendarEvent(alarm: $0.alarm, at: $0.date) }
+            .filter { seen.insert($0.id).inserted }
+    }
+
+    /// `events` together with the phone's `alarms`, earliest first.
+    static func eventsAndAlarms(
+        from start: Date, to end: Date, in store: EKEventStore = EKEventStore()
+    ) -> [CalendarEvent] {
+        (events(from: start, to: end, in: store) + alarms(from: start, to: end))
+            .sorted { ($0.start, $0.end) < ($1.start, $1.end) }
+    }
+
+    /// What the complication lists at a moment: one line per event or alarm.
     struct UpNext: Equatable, Sendable {
         /// The next timed event, when it's on now or starts within `leadWindow`; shown large on the first line.
         var lead: CalendarEvent?
@@ -65,14 +88,14 @@ enum CalendarEvents {
 
     /// Up to `lines` timed events to show at `date`, from `events` sorted by start. All-day events and ones longer
     /// than `longestShown` are never shown, and a block steps aside while a shorter event inside it is on or starts
-    /// within `leadWindow`.
+    /// within `leadWindow`. Alarms show like events, until they ring; a block doesn't step aside for one.
     static func upNext(at date: Date, in events: [CalendarEvent], lines: Int = 3) -> UpNext {
         let candidates = events.filter { $0.isShown && $0.end > date }
         // Otherwise a block crowds out the short meetings that actually happen inside it. Until the next one comes
         // up, the block is what's on, so it still shows.
         let timed = candidates.filter { event in
             event.duration <= blockLength || !candidates.contains {
-                $0.duration < event.duration && event.start <= $0.start && $0.end <= event.end
+                !$0.isAlarm && $0.duration < event.duration && event.start <= $0.start && $0.end <= event.end
                     && $0.start <= date.addingTimeInterval(leadWindow)
             }
         }
@@ -104,13 +127,30 @@ extension CalendarEvent {
         )
     }
 
+    /// An alarm ringing at `date`, in the Clock app's orange.
+    init(alarm: PhoneAlarms.Alarm, at date: Date) {
+        self.init(
+            id: "alarm \(alarm.hour):\(alarm.minute) \(alarm.label ?? "")@\(date.timeIntervalSinceReferenceDate)",
+            title: alarm.label ?? "Alarm",
+            start: date,
+            end: date,
+            isAllDay: false,
+            location: nil,
+            color: RGB(red: 1, green: 0.584, blue: 0),
+            isAlarm: true
+        )
+    }
+
     var duration: TimeInterval {
         end.timeIntervalSince(start)
     }
 
-    /// "10:00 – 10:30 AM", or "All day".
+    /// "10:00 – 10:30 AM", "All day", or for an alarm when it rings ("7:00 AM").
     var timeRange: String {
-        isAllDay ? "All day" : (start ..< end).formatted(.interval.hour().minute())
+        if isAlarm {
+            return start.formatted(date: .omitted, time: .shortened)
+        }
+        return isAllDay ? "All day" : (start ..< end).formatted(.interval.hour().minute())
     }
 }
 

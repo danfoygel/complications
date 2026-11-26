@@ -1,13 +1,14 @@
 import SwiftUI
 
 /// The phone's battery, what the watch has been sent, the complications' accent color, the calendars the watch shows,
-/// and how to set up the automations that keep the watch current.
+/// and how to set up the automations that keep the watch current and send it the alarms.
 struct PhoneView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var locator = Locator()
     @State private var reading: PhoneBatteryReading?
     @State private var lastSent: PhoneBatteryReading?
     @State private var lastLocation: PhoneLocation?
+    @State private var alarms: PhoneAlarms?
     @State private var status: WatchLink.Status?
     @State private var outcome: String?
     @State private var accent = (AccentColor.saved(in: .standard) ?? .standard).color
@@ -31,6 +32,14 @@ struct PhoneView: View {
                     LabeledContent("Location for weather") {
                         if let lastLocation {
                             Text(lastLocation.date, format: .relative(presentation: .named))
+                        } else {
+                            Text("Never")
+                        }
+                    }
+                    LabeledContent("Alarms for calendar") {
+                        if let alarms {
+                            let read = alarms.date.formatted(.relative(presentation: .named))
+                            Text("\(alarms.alarms.count) on, read \(read)")
                         } else {
                             Text("Never")
                         }
@@ -78,6 +87,16 @@ struct PhoneView: View {
                     Text("""
                     The watch also asks the phone directly whenever its app is opened, and iOS runs this app \
                     in the background now and then to send an update.
+                    """)
+                }
+                Section {
+                    AlarmSetup()
+                } header: {
+                    Text("Alarms on the watch")
+                } footer: {
+                    Text("""
+                    iOS doesn't let apps read the Clock app's alarms, but Shortcuts can. The watch's calendar and Up \
+                    Next show the alarms that were on when the shortcut last ran.
                     """)
                 }
             }
@@ -134,6 +153,7 @@ struct PhoneView: View {
         reading = PhoneBatteryReading.current()
         lastSent = Sent.last
         lastLocation = Sent.lastLocation
+        alarms = PhoneAlarms.saved(in: .standard)
         status = await WatchLink.shared.status()
     }
 
@@ -158,6 +178,36 @@ private struct AutomationSetup: View {
             .font(.callout)
             .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct AlarmSetup: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("In Shortcuts, make a shortcut with these actions:")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("1. **Find Alarms** where **Is Enabled** is on")
+                Text("2. **Repeat with Each** item in Alarms")
+                Text("""
+                3. Inside it, **Prepare Alarm for Watch**, with Hours, Minutes, Repeat Days and Label each set to \
+                that property of Repeat Item
+                """)
+                Text("4. After **End Repeat**, **Send Alarms to Watch** with Repeat Results")
+            }
+            .font(.callout)
+            Text("""
+            Then add a personal automation for each trigger below that runs it, set to **Run Immediately** with \
+            **Notify When Run** off:
+            """)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(verbatim: "• App: Clock is closed (after you change an alarm)")
+                Text(verbatim: "• Alarm: any alarm is stopped (a one-time alarm turns off once it rings)")
+                Text(verbatim: "• Time of Day: once a day, for alarms changed elsewhere")
+            }
+            .font(.callout)
+        }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.vertical, 4)
     }
 }

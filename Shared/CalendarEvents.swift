@@ -37,15 +37,36 @@ enum CalendarEvents {
         return await (try? EKEventStore().requestFullAccessToEvents()) ?? false
     }
 
-    /// Events overlapping `start..<end`, earliest first, leaving out cancelled ones and ones the user declined; empty
-    /// without calendar access.
-    static func events(from start: Date, to end: Date, in store: EKEventStore = EKEventStore()) -> [CalendarEvent] {
+    /// Events overlapping `start..<end`, earliest first, leaving out cancelled ones, ones the user declined, and ones
+    /// on calendars `selection` hides; empty without calendar access.
+    static func events(
+        from start: Date,
+        to end: Date,
+        in store: EKEventStore = EKEventStore(),
+        selection: CalendarSelection = .current
+    ) -> [CalendarEvent] {
         guard isAuthorized else { return [] }
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+        let calendars = store.calendars(for: .event)
+        let hidden = hiddenCalendars(in: store, selection: selection)
+        // An empty list would mean every calendar to EventKit.
+        guard hidden.count < calendars.count else { return [] }
+        let predicate = store.predicateForEvents(
+            withStart: start,
+            end: end,
+            calendars: hidden.isEmpty ? nil : calendars.filter { !hidden.contains($0) }
+        )
         return store.events(matching: predicate)
             .filter { $0.status != .canceled && !$0.isDeclined }
             .map(CalendarEvent.init)
             .sorted { ($0.start, $0.end) < ($1.start, $1.end) }
+    }
+
+    /// The calendars here that `selection` leaves out.
+    static func hiddenCalendars(in store: EKEventStore, selection: CalendarSelection = .current) -> [EKCalendar] {
+        guard !selection.hidden.isEmpty else { return [] }
+        let calendars = store.calendars(for: .event)
+        let keys = calendars.map(CalendarSelection.Key.init)
+        return zip(calendars, keys).filter { selection.hides($0.1, among: keys) }.map(\.0)
     }
 
     /// The phone's alarms that ring in `start..<end`, from the latest the phone sent, as events that start and end when

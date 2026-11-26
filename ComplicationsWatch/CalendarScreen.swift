@@ -7,6 +7,8 @@ struct CalendarScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var days: [(day: Date, events: [CalendarEvent])] = []
     @State private var isAuthorized = CalendarEvents.isAuthorized
+    /// The calendars the phone's pick leaves out, named at the bottom so a calendar that went missing can be found.
+    @State private var hidden: [String] = []
     /// Kept for as long as the screen is open: EventKit only reports changes to a store that's still around.
     @State private var store = EKEventStore()
 
@@ -25,6 +27,11 @@ struct CalendarScreen: View {
                         EventRow(event: event)
                     }
                 }
+            }
+            if !hidden.isEmpty {
+                Text("Hidden on iPhone: \(hidden.formatted(.list(type: .and)))")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .navigationTitle("Calendar")
@@ -60,6 +67,7 @@ struct CalendarScreen: View {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
         let after = calendar.date(byAdding: .day, value: 1, to: tomorrow)!
         let events = CalendarEvents.eventsAndAlarms(from: now, to: after, in: store)
+        hidden = CalendarEvents.hiddenCalendars(in: store).map(\.title).sorted()
         days = [today, tomorrow].map { day in
             (day, events.filter { calendar.isDate(max($0.start, now), inSameDayAs: day) })
         }

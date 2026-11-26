@@ -17,7 +17,7 @@ settings:
     CURRENT_PROJECT_VERSION: "4"
 
 targets:
-  # iPhone companion. Its only job is getting the phone's battery level and location to the watch.
+  # iPhone companion. Gets the phone's battery level and location to the watch, and picks the accent color and calendars.
   Complications:
     type: application
     platform: iOS
@@ -44,6 +44,7 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Sends your location to your Apple Watch for its weather.
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Lists your calendars so you can pick which ones your Apple Watch shows.
 
   # Tapping a complication opens this app on that complication's screen.
   ComplicationsWatch:

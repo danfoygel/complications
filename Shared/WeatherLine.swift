@@ -224,21 +224,22 @@ extension PrecipitationForecast {
         func at(_ hour: Double) -> Date {
             today.addingTimeInterval(hour * 3600)
         }
-        return PrecipitationForecast(
-            minutes: [],
-            hours: (0 ..< 48).map { hour in
-                ForecastHour(
-                    date: at(Double(hour)), temperature: 15, precipitation: (12 ..< 15).contains(hour) ? .rain : nil,
-                    precipitationAmount: (12 ..< 15).contains(hour) ? 3.5 : 0
-                )
-            },
-            days: (0 ..< 7).map { day in
-                ForecastDay(
-                    date: at(Double(day * 24)), low: 8, high: 16, precipitation: day == 3 ? .rain : nil,
-                    sunrise: at(Double(day * 24) + 7.35), sunset: at(Double(day * 24) + 17.7)
-                )
-            },
-            airQuality: (0 ..< 48).map { AirQualityReading(date: at(Double($0)), aqi: 38) }
-        )
+        // Built apart: as one expression it can take the type checker past its time limit.
+        let hours: [ForecastHour] = (0 ..< 48).map { hour in
+            let isRaining = (12 ..< 15).contains(hour)
+            return ForecastHour(
+                date: at(Double(hour)), temperature: 15, precipitation: isRaining ? .rain : nil,
+                precipitationAmount: isRaining ? 3.5 : 0
+            )
+        }
+        let days: [ForecastDay] = (0 ..< 7).map { day in
+            let start = Double(day * 24)
+            return ForecastDay(
+                date: at(start), low: 8, high: 16, precipitation: day == 3 ? .rain : nil,
+                sunrise: at(start + 7.35), sunset: at(start + 17.7)
+            )
+        }
+        let airQuality: [AirQualityReading] = (0 ..< 48).map { AirQualityReading(date: at(Double($0)), aqi: 38) }
+        return PrecipitationForecast(minutes: [], hours: hours, days: days, airQuality: airQuality)
     }()
 }

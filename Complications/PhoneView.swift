@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The phone's battery, what the watch has been sent, the complications' accent color, and how to set up the
-/// automations that keep the watch current.
+/// The phone's battery, what the watch has been sent, the complications' accent color, the calendars the watch shows,
+/// and how to set up the automations that keep the watch current.
 struct PhoneView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var locator = Locator()
@@ -11,8 +11,10 @@ struct PhoneView: View {
     @State private var status: WatchLink.Status?
     @State private var outcome: String?
     @State private var accent = (AccentColor.saved(in: .standard) ?? .standard).color
-    /// Sends a new accent once the picker has settled, rather than on every step of a drag.
-    @State private var accentSend: Task<Void, Never>?
+    @State private var calendars = CalendarSelection.saved(in: .standard) ?? .all
+    /// Sends a new accent or calendar selection once the picker has settled, rather than on every step of a drag or
+    /// every switch flipped.
+    @State private var pendingSend: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -48,6 +50,18 @@ struct PhoneView: View {
                     outline in this color. The battery outline turns red under 20%.
                     """)
                 }
+                Section {
+                    NavigationLink {
+                        CalendarPicker(selection: $calendars)
+                    } label: {
+                        LabeledContent(
+                            "Calendars",
+                            value: calendars.hidden.isEmpty ? "All" : "\(calendars.hidden.count) hidden"
+                        )
+                    }
+                } footer: {
+                    Text("Up Next and the Calendar screen on the watch show events from these calendars.")
+                }
                 if let status {
                     Section("Watch") {
                         LabeledContent("Paired", value: status.isPaired ? "Yes" : "No")
@@ -82,18 +96,26 @@ struct PhoneView: View {
         }
         .onChange(of: accent) {
             AccentColor(accent).save(in: .standard)
-            accentSend?.cancel()
-            accentSend = Task {
-                try? await Task.sleep(for: .seconds(1))
-                guard !Task.isCancelled else { return }
-                await send()
-            }
+            sendSoon()
+        }
+        .onChange(of: calendars) {
+            calendars.save(in: .standard)
+            sendSoon()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
             Task { await send() }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryStateDidChangeNotification)) { _ in
             Task { await send() }
+        }
+    }
+
+    private func sendSoon() {
+        pendingSend?.cancel()
+        pendingSend = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            await send()
         }
     }
 
